@@ -3,6 +3,10 @@
 #include "fb.h"
 #include "kprintf.h"
 #include "panic.h"
+#include "gdt.h"
+#include "idt.h"
+#include "pic.h"
+#include "keyboard.h"
 
 __attribute__((used, section(".limine_requests_start")))
 static volatile uint64_t requests_start[] = LIMINE_REQUESTS_START_MARKER;
@@ -47,6 +51,26 @@ void kmain(void) {
     if (memmap_request.response)
         kprintf("Memory map entries: %lu\n", memmap_request.response->entry_count);
 
+    gdt_init();
+    kprintf("GDT + TSS loaded\n");
+    idt_init();
+    kprintf("IDT loaded (256 vectors)\n");
+    pic_init();
+    keyboard_init();
+    kprintf("PIC remapped to vectors 0x20-0x2F, keyboard on IRQ1\n");
+
+#ifdef EXC_TEST
+    /* 1 divide error, 2 invalid opcode, 3 #GP, 4 null deref (#PF), 5 double fault */
+    kprintf("triggering test exception %d\n", EXC_TEST);
+    switch (EXC_TEST) {
+    case 1: { volatile int a = 1, b = 0; kprintf("%d\n", a / b); break; }
+    case 2: __asm__ volatile ("ud2"); break;
+    case 3: __asm__ volatile ("mov %0, %%ds" : : "r"((uint16_t)0x38)); break;
+    case 4: kprintf("%d\n", *(volatile int *)0); break;
+    case 5: idt_set_present(14, 0); kprintf("%d\n", *(volatile int *)0); break;
+    }
+#endif
+
 #ifdef SCROLL_TEST
     for (int i = 0; i < 70; i++) kprintf("scroll test line %d\n", i);
 #endif
@@ -55,6 +79,7 @@ void kmain(void) {
     panic("test panic, value=%d", 1234);
 #endif
 
-    kprintf("Boot complete, halting.\n");
+    __asm__ volatile ("sti");
+    kprintf("Interrupts on. Type something:\n> ");
     for (;;) __asm__ volatile ("hlt");
 }

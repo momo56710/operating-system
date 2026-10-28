@@ -18,8 +18,9 @@ CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -ffreestanding -fno-stack-protector \
 CFLAGS += $(EXTRA)
 LDFLAGS := -nostdlib -static -z max-page-size=0x1000 -T linker.ld
 
-SRCS := $(shell find kernel -name '*.c')
-OBJS := $(SRCS:%.c=build/%.o)
+SRCS    := $(shell find kernel arch -name '*.c')
+ASMSRCS := $(shell find arch -name '*.asm')
+OBJS    := $(SRCS:%.c=build/%.o) $(ASMSRCS:%.asm=build/%.asm.o)
 -include $(OBJS:.o=.d)
 
 .PHONY: all iso run debug trace clean
@@ -28,6 +29,10 @@ all: kernel.elf
 build/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+build/%.asm.o: %.asm
+	@mkdir -p $(dir $@)
+	nasm -f elf64 -g -F dwarf $< -o $@
 
 kernel.elf: $(OBJS) linker.ld
 	$(LD) $(LDFLAGS) $(OBJS) -o $@
