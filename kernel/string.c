@@ -7,17 +7,16 @@ void *memset(void *dst, int c, size_t n) {
 }
 
 void *memcpy(void *dst, const void *src, size_t n) {
-    unsigned char *d = dst;
-    const unsigned char *s = src;
-    while (n--) *d++ = *s++;
-    return dst;
+    void *ret = dst;
+    __asm__ volatile ("rep movsb" : "+D"(dst), "+S"(src), "+c"(n) : : "memory");
+    return ret;
 }
 
 void *memmove(void *dst, const void *src, size_t n) {
     unsigned char *d = dst;
     const unsigned char *s = src;
-    if (d < s) {
-        while (n--) *d++ = *s++;
+    if (d <= s || d >= s + n) {
+        return memcpy(dst, src, n);
     } else {
         d += n;
         s += n;
@@ -37,4 +36,9 @@ size_t strlen(const char *s) {
     size_t n = 0;
     while (s[n]) n++;
     return n;
+}
+
+int strcmp(const char *a, const char *b) {
+    while (*a && *a == *b) { a++; b++; }
+    return (unsigned char)*a - (unsigned char)*b;
 }

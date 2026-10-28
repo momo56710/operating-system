@@ -9,6 +9,10 @@ struct interrupt_frame {
     uint64_t rip, cs, rflags, rsp, ss;   /* pushed by the CPU */
 };
 
+#define IRQ_BASE     0x20   /* ISA IRQ n arrives as vector 0x20 + n */
+#define VEC_TIMER    0x40   /* Local APIC timer */
+#define VEC_SPURIOUS 0xFF
+
 typedef void (*irq_handler_t)(void);
 
 void irq_register(int irq, irq_handler_t handler);

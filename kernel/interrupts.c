@@ -1,5 +1,7 @@
 #include "interrupt.h"
 #include "pic.h"
+#include "apic.h"
+#include "task.h"
 #include "io.h"
 #include "kprintf.h"
 #include "vmm.h"
@@ -28,6 +30,7 @@ static uint64_t read_cr(int n) {
 }
 
 static void exception(struct interrupt_frame *f) {
+    kprintf_force_unlock();                   /* the faulting code may have held the print lock */
     kprintf("\n*** EXCEPTION %lu: %s ***\n", f->vector, exception_names[f->vector]);
 
     if (f->vector == 14) {
@@ -56,10 +59,14 @@ void interrupt_handler(struct interrupt_frame *f) {
         return;                               /* a lazily mapped page: retry the access */
     if (f->vector < 32) {
         exception(f);
-    } else if (f->vector < IRQ_BASE + 16) {
+    } else if (f->vector == VEC_TIMER) {
+        irq_eoi();                            /* before switching tasks, or the APIC stays blocked */
+        sched_tick();
+    } else if (f->vector == VEC_SPURIOUS) {
+        return;                               /* spurious: no EOI */
+    } else if (f->vector >= IRQ_BASE && f->vector < IRQ_BASE + 16) {
         int irq = f->vector - IRQ_BASE;
-        if (pic_is_spurious(irq)) return;
         if (irq_handlers[irq]) irq_handlers[irq]();
-        pic_eoi(irq);
+        irq_eoi();
     }
 }

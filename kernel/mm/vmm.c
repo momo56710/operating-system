@@ -4,6 +4,7 @@
 #include "kprintf.h"
 #include "panic.h"
 #include "string.h"
+#include "spinlock.h"
 
 #define PTE_P    (1ULL << 0)
 #define PTE_PS   (1ULL << 7)
@@ -15,6 +16,7 @@ extern char __text_start[], __text_end[], __rodata_start[], __rodata_end[],
             __data_start[], __data_end[];
 
 uint64_t hhdm_offset;
+static spinlock_t vmm_lock;
 static uint64_t kernel_pml4;             /* physical address of the top-level table */
 
 struct lazy_region { uint64_t base, len, flags; };
@@ -88,27 +90,36 @@ static uint64_t *leaf(uint64_t virt, int *is_large) {
 }
 
 int vmm_map(uint64_t virt, uint64_t phys, uint64_t flags) {
+    uint64_t f = spin_lock_irqsave(&vmm_lock);
     int r = map_in(kernel_pml4, virt, phys, flags, 0);
     if (r == 0) invlpg(virt);
+    spin_unlock_irqrestore(&vmm_lock, f);
     return r;
 }
 
 uint64_t vmm_unmap(uint64_t virt) {
+    uint64_t f = spin_lock_irqsave(&vmm_lock);
     int large;
     uint64_t *e = leaf(virt, &large);
-    if (!e || large) return 0;
-    uint64_t phys = *e & PTE_ADDR;
-    *e = 0;
-    invlpg(virt);
+    uint64_t phys = 0;
+    if (e && !large) {
+        phys = *e & PTE_ADDR;
+        *e = 0;
+        invlpg(virt);
+    }
+    spin_unlock_irqrestore(&vmm_lock, f);
     return phys;
 }
 
 uint64_t vmm_translate(uint64_t virt) {
+    uint64_t f = spin_lock_irqsave(&vmm_lock);
     int large;
     uint64_t *e = leaf(virt, &large);
-    if (!e) return 0;
-    if (large) return (*e & PTE_ADDR & ~(SIZE_2M - 1)) | (virt & (SIZE_2M - 1));
-    return (*e & PTE_ADDR) | (virt & (SIZE_4K - 1));
+    uint64_t r = 0;
+    if (e) r = large ? (*e & PTE_ADDR & ~(SIZE_2M - 1)) | (virt & (SIZE_2M - 1))
+                     : (*e & PTE_ADDR) | (virt & (SIZE_4K - 1));
+    spin_unlock_irqrestore(&vmm_lock, f);
+    return r;
 }
 
 /* Map a physical range into the higher-half direct map, using 2 MiB pages where possible. */

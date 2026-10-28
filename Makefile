@@ -10,7 +10,9 @@ endif
 
 LIMINE_DIR ?= /usr/share/limine
 QEMU       := qemu-system-x86_64
-QEMUFLAGS  := -cdrom os.iso -serial stdio -no-reboot -no-shutdown -m 512M -display gtk
+QEMUFLAGS  := -cdrom os.iso -serial stdio -m 512M -display gtk
+# debug and trace freeze on a reset instead of rebooting, so a triple fault stays visible
+CRASHFLAGS := -no-reboot -no-shutdown
 
 CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -ffreestanding -fno-stack-protector \
           -fno-pic -fno-pie -fno-lto -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
@@ -56,11 +58,11 @@ run: os.iso
 	$(QEMU) $(QEMUFLAGS)
 
 debug: os.iso
-	$(QEMU) $(QEMUFLAGS) -s -S &
+	$(QEMU) $(QEMUFLAGS) $(CRASHFLAGS) -s -S &
 	gdb kernel.elf -ex 'target remote :1234'
 
 trace: os.iso
-	$(QEMU) $(QEMUFLAGS) -d int,cpu_reset -D qemu.log
+	$(QEMU) $(QEMUFLAGS) $(CRASHFLAGS) -d int,cpu_reset -D qemu.log
 
 clean:
 	rm -rf build iso_root kernel.elf os.iso qemu.log

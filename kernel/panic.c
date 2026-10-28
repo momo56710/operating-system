@@ -15,6 +15,7 @@ void panic(const char *fmt, ...) {
     __asm__ volatile ("mov %%cr3, %0" : "=r"(cr3));
     __asm__ volatile ("mov %%cr4, %0" : "=r"(cr4));
 
+    kprintf_force_unlock();
     kprintf("\n*** KERNEL PANIC: ");
     va_list ap;
     va_start(ap, fmt);

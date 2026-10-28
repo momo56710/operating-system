@@ -3,3 +3,4 @@
 
 void fb_init(struct limine_framebuffer *fb);
 void fb_putc(char c);
+void fb_clear(void);

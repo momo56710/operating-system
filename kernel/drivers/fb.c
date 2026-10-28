@@ -78,3 +78,10 @@ void fb_putc(char c) {
     if (cur_y >= rows) scroll();
     draw_cursor(1);
 }
+
+void fb_clear(void) {
+    if (!fb_ok) return;
+    for (uint32_t r = 0; r < rows; r++) clear_row(r);
+    cur_x = cur_y = 0;
+    draw_cursor(1);
+}

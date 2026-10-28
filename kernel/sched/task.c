@@ -1,0 +1,137 @@
+#include "task.h"
+#include "spinlock.h"
+#include "heap.h"
+#include "string.h"
+#include "panic.h"
+#include "kprintf.h"
+
+#define STACK_SIZE    16384
+#define QUANTUM_TICKS 10          /* 10 ms time slice at 1000 Hz */
+
+extern void switch_to(uint64_t *save_rsp, uint64_t new_rsp);
+extern void task_trampoline(void);
+
+static struct task idle_task;     /* the boot context: pid 0, runs only when nothing else can */
+static struct task *current = &idle_task;
+static uint64_t next_pid = 1;
+static volatile uint64_t ticks;
+
+struct task *current_task(void) { return current; }
+uint64_t uptime_ms(void) { return ticks; }
+
+void sched_init(void) {
+    idle_task.pid = 0;
+    idle_task.state = TASK_RUNNING;
+    idle_task.next = &idle_task;
+    idle_task.quantum = QUANTUM_TICKS;
+    memcpy(idle_task.name, "idle", 5);
+}
+
+struct task *task_create(const char *name, void (*fn)(void *), void *arg) {
+    struct task *t = kmalloc(sizeof *t);
+    uint8_t *stack = kmalloc(STACK_SIZE);
+    if (!t || !stack) panic("task_create: out of memory");
+    memset(t, 0, sizeof *t);
+    memset(stack, 0, STACK_SIZE);     /* touch every page now: a stack must never fault on demand */
+
+    /* Fake the frame switch_to() expects to pop, ending in a `ret` to the trampoline. */
+    uint64_t *sp = (uint64_t *)(stack + STACK_SIZE) - 7;
+    sp[0] = 0;                        /* r15 */
+    sp[1] = 0;                        /* r14 */
+    sp[2] = (uint64_t)arg;            /* r13: argument for fn */
+    sp[3] = (uint64_t)fn;             /* r12: entry point */
+    sp[4] = 0;                        /* rbp */
+    sp[5] = 0;                        /* rbx */
+    sp[6] = (uint64_t)task_trampoline;
+
+    t->rsp = (uint64_t)sp;
+    t->stack = stack;
+    t->state = TASK_READY;
+    t->quantum = QUANTUM_TICKS;
+    for (int i = 0; i < 15 && name[i]; i++) t->name[i] = name[i];
+
+    uint64_t flags = irq_save();
+    t->pid = next_pid++;
+    t->next = idle_task.next;         /* insert right after idle in the circular list */
+    idle_task.next = t;
+    irq_restore(flags);
+    return t;
+}
+
+/* Next READY task after `prev` in round-robin order, or idle if nothing can run. */
+static struct task *pick_next(struct task *prev) {
+    struct task *t = prev->next;
+    for (;;) {
+        if (t != &idle_task && t->state == TASK_READY) return t;
+        if (t == prev) break;
+        t = t->next;
+    }
+    return &idle_task;
+}
+
+void schedule(void) {                 /* interrupts are off */
+    struct task *prev = current;
+    if (prev->state == TASK_RUNNING) prev->state = TASK_READY;
+    struct task *next = pick_next(prev);
+    next->state = TASK_RUNNING;
+    next->quantum = QUANTUM_TICKS;
+    if (next == prev) return;
+    current = next;
+    switch_to(&prev->rsp, next->rsp);
+}
+
+void sched_tick(void) {               /* timer interrupt, interrupts off */
+    ticks++;
+    for (struct task *t = idle_task.next; t != &idle_task; t = t->next)
+        if (t->state == TASK_SLEEPING && t->wake_tick <= ticks) t->state = TASK_READY;
+    if (current == &idle_task || --current->quantum <= 0)
+        schedule();
+}
+
+void yield(void) {
+    uint64_t flags = irq_save();
+    schedule();
+    irq_restore(flags);
+}
+
+void sleep_ms(uint64_t ms) {
+    if (current == &idle_task) panic("the idle task cannot sleep");
+    uint64_t flags = irq_save();
+    current->wake_tick = ticks + (ms ? ms : 1);
+    current->state = TASK_SLEEPING;
+    schedule();
+    irq_restore(flags);
+}
+
+void task_exit(void) {
+    irq_save();
+    current->state = TASK_ZOMBIE;
+    schedule();
+    panic("a zombie task was scheduled again");
+}
+
+/* Free the stacks of finished tasks. Runs from the idle loop, never on the dead task's own stack. */
+void reap_zombies(void) {
+    for (;;) {
+        struct task *dead = 0, *prev = &idle_task;
+        uint64_t flags = irq_save();
+        for (struct task *t = idle_task.next; t != &idle_task; prev = t, t = t->next)
+            if (t->state == TASK_ZOMBIE) { dead = t; prev->next = t->next; break; }
+        irq_restore(flags);
+        if (!dead) return;
+        kfree(dead->stack);
+        kfree(dead);
+    }
+}
+
+void task_print_all(void) {
+    static const char *names[] = { "running", "ready", "sleeping", "blocked", "zombie" };
+    kprintf("PID  STATE     NAME\n");
+    uint64_t flags = irq_save();
+    struct task *t = &idle_task;
+    do {
+        kprintf("%-4lu %-9s %s\n", t->pid, names[t->state], t->name);
+        t = t->next;
+    } while (t != &idle_task);
+    irq_restore(flags);
+}

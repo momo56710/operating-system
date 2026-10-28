@@ -1,8 +1,9 @@
 #include "keyboard.h"
 #include "interrupt.h"
-#include "pic.h"
+#include "apic.h"
+#include "sync.h"
+#include "spinlock.h"
 #include "io.h"
-#include "kprintf.h"
 
 /* Scancode set 1 (what QEMU's PS/2 controller delivers), keys 0x00-0x39. */
 static const char normal[58] __attribute__((nonstring)) =
@@ -11,6 +12,29 @@ static const char shifted[58] __attribute__((nonstring)) =
     "\0\0" "!@#$%^&*()_+" "\b\t" "QWERTYUIOP{}" "\n\0" "ASDFGHJKL:\"~" "\0|" "ZXCVBNM<>?" "\0*\0 ";
 
 static int shift, caps;
+
+/* Typed characters wait here until a task reads them with kbd_getc(). */
+#define QSIZE 128
+static char queue[QSIZE];
+static volatile unsigned q_head, q_tail;
+static struct sem q_sem;
+
+static void kbd_push(char c) {                   /* interrupt context */
+    unsigned next = (q_head + 1) % QSIZE;
+    if (next == q_tail) return;                  /* full: drop the key */
+    queue[q_head] = c;
+    q_head = next;
+    sem_post(&q_sem);
+}
+
+char kbd_getc(void) {
+    sem_wait(&q_sem);
+    uint64_t f = irq_save();
+    char c = queue[q_tail];
+    q_tail = (q_tail + 1) % QSIZE;
+    irq_restore(f);
+    return c;
+}
 
 static void keyboard_irq(void) {
     uint8_t sc = inb(0x60);
@@ -27,8 +51,7 @@ static void keyboard_irq(void) {
         c ^= 0x20;                            /* flip letter case */
     if (!c) return;
 
-    if (c == '\b') { kputc('\b'); kputc(' '); kputc('\b'); }
-    else kputc(c);
+    kbd_push(c);
 }
 
 /* The bootloader may leave the 8042 PS/2 controller in any state, so set it
@@ -48,6 +71,7 @@ void keyboard_init(void) {
     kbc_wait_write(); outb(0x60, 0xF4);           /* keyboard: enable scanning */
     kbc_wait_read();  inb(0x60);                  /* ACK (0xFA) */
 
+    sem_init(&q_sem, 0);
     irq_register(1, keyboard_irq);
-    pic_unmask(1);
+    irq_enable(1);
 }

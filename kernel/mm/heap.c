@@ -3,6 +3,7 @@
 #include "pmm.h"
 #include "kprintf.h"
 #include "panic.h"
+#include "spinlock.h"
 
 /* Free-list heap in its own virtual window. Pages are mapped on first touch by the
  * page fault handler, and handed back to the PMM when the blocks on them are freed.
@@ -24,6 +25,7 @@ struct links { struct blk *next, *prev; };
 static uint64_t heap_end = HEAP_BASE;
 static struct blk *free_head;
 static struct blk *last;                  /* highest-address block */
+static spinlock_t heap_lock;
 
 static inline uint64_t align_up(uint64_t v, uint64_t a)   { return (v + a - 1) & ~(a - 1); }
 static inline uint64_t align_down(uint64_t v, uint64_t a) { return v & ~(a - 1); }
@@ -103,7 +105,7 @@ static int heap_expand(uint64_t need) {
     return 1;
 }
 
-void *kmalloc(size_t n) {
+static void *kmalloc_locked(size_t n) {
     if (!n || n > HEAP_MAX) return 0;
     uint64_t need = align_up(n, 16) + HDR;
     if (need < MIN_BLOCK) need = MIN_BLOCK;
@@ -131,7 +133,7 @@ void *kmalloc(size_t n) {
     }
 }
 
-void kfree(void *p) {
+static void kfree_locked(void *p) {
     if (!p) return;
     uint64_t a = (uint64_t)p;
     if (a < HEAP_BASE + HDR || a >= heap_end || (a & 15))
@@ -142,7 +144,20 @@ void kfree(void *p) {
     free_block(b, 0);
 }
 
-void heap_stats(uint64_t *mapped_span, uint64_t *used_bytes, uint64_t *free_bytes) {
+void *kmalloc(size_t n) {
+    uint64_t f = spin_lock_irqsave(&heap_lock);
+    void *r = kmalloc_locked(n);
+    spin_unlock_irqrestore(&heap_lock, f);
+    return r;
+}
+
+void kfree(void *p) {
+    uint64_t f = spin_lock_irqsave(&heap_lock);
+    kfree_locked(p);
+    spin_unlock_irqrestore(&heap_lock, f);
+}
+
+static void heap_stats_locked(uint64_t *mapped_span, uint64_t *used_bytes, uint64_t *free_bytes) {
     uint64_t used = 0, fr = 0;
     for (uint64_t a = HEAP_BASE; a < heap_end; a += bsize((struct blk *)a)) {
         struct blk *b = (struct blk *)a;
@@ -153,7 +168,7 @@ void heap_stats(uint64_t *mapped_span, uint64_t *used_bytes, uint64_t *free_byte
     if (free_bytes) *free_bytes = fr;
 }
 
-int heap_check(void) {
+static int heap_check_locked(void) {
     uint64_t expect_prev = 0, nfree = 0, prev_free = 0;
     for (uint64_t a = HEAP_BASE; a < heap_end; ) {
         struct blk *b = (struct blk *)a;
@@ -175,4 +190,17 @@ int heap_check(void) {
     }
     if (listed != nfree) { kprintf("heap_check: free list has %lu, heap has %lu\n", listed, nfree); return -1; }
     return 0;
+}
+
+void heap_stats(uint64_t *mapped_span, uint64_t *used_bytes, uint64_t *free_bytes) {
+    uint64_t f = spin_lock_irqsave(&heap_lock);
+    heap_stats_locked(mapped_span, used_bytes, free_bytes);
+    spin_unlock_irqrestore(&heap_lock, f);
+}
+
+int heap_check(void) {
+    uint64_t f = spin_lock_irqsave(&heap_lock);
+    int r = heap_check_locked();
+    spin_unlock_irqrestore(&heap_lock, f);
+    return r;
 }
