@@ -3,3 +3,4 @@ iso_root/
 *.elf
 *.iso
 qemu.log
+disk.img

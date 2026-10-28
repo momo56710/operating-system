@@ -6,8 +6,6 @@
 #include "heap.h"
 #include "string.h"
 #include "io.h"
-#include "modules.h"
-#include "process.h"
 
 /* A stand-in shell that lives in the kernel. It is replaced in Phase 6 by a real
  * userspace shell that launches programs from disk. */
@@ -57,31 +55,6 @@ static void cmd_meminfo(int argc, char **argv) {
     kprintf("heap:     %lu KiB mapped span, %lu B in use, %lu B free\n", span >> 10, used, fr);
 }
 
-static void cmd_progs(int argc, char **argv) {
-    (void)argc; (void)argv;
-    for (size_t i = 0; i < module_count(); i++) {
-        kprintf("  ");
-        kwrite(module_name(i), module_name_len(i));
-        kprintf("\n");
-    }
-}
-
-/* Start a user program (argv[0] is its name) and wait for it to finish. */
-static void run_program(char **argv) {
-    long pid = process_spawn(argv[0], argv);
-    if (pid < 0) { kprintf("cannot start '%s'\n", argv[0]); return; }
-    int status = 0;
-    process_wait(&status);
-    if (status >= PROC_FAULT_BASE) kprintf("[process %ld killed by exception %d]\n", pid, status - PROC_FAULT_BASE);
-    else                           kprintf("[process %ld exited with status %d]\n", pid, status);
-}
-
-/* run <program> [args...] */
-static void cmd_run(int argc, char **argv) {
-    if (argc < 2) { kprintf("usage: run <program> [args...]   (see progs)\n"); return; }
-    run_program(&argv[1]);
-}
-
 static void cmd_ps(int argc, char **argv) { (void)argc; (void)argv; task_print_all(); }
 
 static void cmd_reboot(int argc, char **argv) {
@@ -101,8 +74,6 @@ static const struct command commands[] = {
     { "sleep",   "sleep <ms>: wait, then say so",    cmd_sleep },
     { "meminfo", "physical memory and heap usage",   cmd_meminfo },
     { "ps",      "list tasks and their states",      cmd_ps },
-    { "progs",   "list the user programs",           cmd_progs },
-    { "run",     "run <prog> [args]: run a program", cmd_run },
     { "reboot",  "reset the machine",                cmd_reboot },
 };
 #define NCOMMANDS (sizeof commands / sizeof commands[0])
@@ -127,7 +98,6 @@ static void run_line(char *line) {
     argv[argc] = 0;
     for (unsigned i = 0; i < NCOMMANDS; i++)
         if (!strcmp(argv[0], commands[i].name)) { commands[i].fn(argc, argv); return; }
-    if (module_find(argv[0], 0)) { run_program(argv); return; }     /* a bare program name works too */
     kprintf("unknown command: %s (try help)\n", argv[0]);
 }
 

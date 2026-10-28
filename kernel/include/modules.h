@@ -3,7 +3,7 @@
 #include "limine.h"
 
 /* Files the bootloader loaded next to the kernel. Until there is a filesystem (Phase 6),
- * user programs reach the kernel this way, looked up by name without the ".elf" suffix. */
+ * user programs reach the kernel this way, looked up by file name (for example "initrd.tar"). */
 void        modules_init(struct limine_module_response *r);
 const void *module_find(const char *name, size_t *size);
 size_t      module_count(void);

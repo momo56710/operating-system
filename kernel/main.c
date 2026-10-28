@@ -18,6 +18,10 @@
 #include "shell.h"
 #include "modules.h"
 #include "syscall.h"
+#include "vfs.h"
+#include "process.h"
+#include "blk.h"
+#include "pci.h"
 
 __attribute__((used, section(".limine_requests_start")))
 static volatile uint64_t requests_start[] = LIMINE_REQUESTS_START_MARKER;
@@ -59,6 +63,26 @@ __attribute__((used, section(".limine_requests_end")))
 static volatile uint64_t requests_end[] = LIMINE_REQUESTS_END_MARKER;
 
 /* ---- kernel threads ---- */
+
+/* The first process: gives the console to stdin/stdout/stderr, then keeps a shell running. */
+static void init_thread(void *arg) {
+    (void)arg;
+    struct task *me = current_task();
+    for (int i = 0; i < 3; i++) {
+        struct file *c = file_open("/dev/console", i == 0 ? O_RDONLY : O_WRONLY);
+        if (!c) panic("init: cannot open /dev/console");
+        me->fds[i] = c;
+    }
+    for (;;) {
+        char *argv[] = { "sh", 0 };
+        long pid = process_spawn("/bin/sh", argv);
+        if (pid < 0) { kprintf("init: cannot start /bin/sh\n"); sleep_ms(2000); continue; }
+        int status;
+        process_wait(&status);
+        kprintf("\ninit: the shell exited (status %d), starting it again\n", status);
+    }
+}
+
 
 #ifdef THREAD_DEMO
 struct letter { char ch; unsigned period_ms; };
@@ -147,6 +171,24 @@ void kmain(void) {
         kprintf("ACPI: not available, using default APIC addresses\n");
     apic_init();
     sched_init();
+
+    size_t initrd_size;
+    const void *initrd = module_find("initrd.tar", &initrd_size);
+    if (!initrd) panic("no initrd.tar module: the boot image is incomplete");
+    struct vnode *rootfs = memfs_new(1);
+    tar_mount(rootfs, initrd, initrd_size);
+    vfs_mount("/", rootfs);
+    vfs_mount("/tmp", memfs_new(0));
+    vfs_mount("/dev", devfs_new());
+    kprintf("VFS: ramdisk on /, tmpfs on /tmp, devices on /dev\n");
+
+    if (virtio_blk_init() == 0) {
+        struct vnode *disk = fat32_mount();
+        if (disk) { vfs_mount("/disk", disk); kprintf("VFS: FAT32 disk on /disk\n"); }
+        else kprintf("disk: found, but it has no usable FAT32 volume\n");
+    } else {
+        kprintf("disk: none (add -drive file=disk.img,if=virtio,format=raw)\n");
+    }
     keyboard_init();
     lapic_timer_start(1000);
     kprintf("Scheduler ready, timer at 1000 Hz\n");
@@ -174,7 +216,11 @@ void kmain(void) {
     panic("test panic, value=%d", 1234);
 #endif
 
-    task_create("shell", shell_thread, 0);
+#ifdef KSHELL
+    task_create("kshell", shell_thread, 0);      /* the built-in kernel shell, for debugging */
+#else
+    task_create("init", init_thread, 0);
+#endif
 #ifdef THREAD_DEMO
     for (int i = 0; i < 3; i++) task_create("letter", letter_thread, &letters[i]);
     task_create("busy", busy_thread, 0);

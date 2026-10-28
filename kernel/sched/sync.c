@@ -53,3 +53,22 @@ void mutex_unlock(struct mutex *m) {
     m->owner = 0;
     sem_post(&m->sem);
 }
+
+void waitq_block(struct waitq *q, spinlock_t *lock, uint64_t flags) {
+    struct task *me = current_task();
+    me->wait_next = q->head;
+    q->head = me;
+    me->state = TASK_BLOCKED;
+    spin_unlock(lock);                 /* interrupts are still off, so nothing can slip in before we sleep */
+    schedule();
+    irq_restore(flags);
+}
+
+void waitq_wake_all(struct waitq *q) {
+    for (struct task *t = q->head; t; ) {
+        struct task *next = t->wait_next;
+        t->state = TASK_READY;
+        t = next;
+    }
+    q->head = 0;
+}

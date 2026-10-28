@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include "vfs.h"
 
 enum task_state {
     TASK_RUNNING, TASK_READY, TASK_SLEEPING, TASK_BLOCKED,
@@ -25,11 +26,14 @@ struct task {
     struct task    *parent;
     int             exit_code;
     int             waiting;      /* blocked in wait() */
+    struct file    *fds[FD_MAX];  /* open files; 0, 1, 2 are stdin, stdout, stderr */
+    char            cwd[CWD_MAX];
 };
 
 struct task_init {                /* optional extra setup for task_create_ex */
     uint64_t     pml4, brk_start, brk, mmap_next;
     struct task *parent;
+    struct task *inherit;         /* copy this task's open files and working directory */
 };
 
 void         sched_init(void);    /* turns the boot context into task 0, the idle task */
@@ -46,5 +50,6 @@ struct task *current_task(void);
 void         task_print_all(void);   /* for the shell's ps command */
 void         task_set_space(uint64_t pml4);   /* load these page tables and remember it */
 void         task_use_kernel_space(void);     /* load the kernel's own (before freeing a process's) */
+int          task_info(uint64_t index, struct si_task *out);   /* for sysinfo(SI_TASK) */
 struct task *task_find_child(struct task *parent, int defunct_only);
 void         task_orphan_children(struct task *parent);

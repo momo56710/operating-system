@@ -2,19 +2,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* System call numbers: keep in step with kernel/include/syscall.h. */
-#define SYS_WRITE  1
-#define SYS_EXIT   2
-#define SYS_GETPID 3
-#define SYS_YIELD  4
-#define SYS_SLEEP  5
-#define SYS_BRK    6
-#define SYS_MMAP   7
-#define SYS_MUNMAP 8
-#define SYS_FORK   9
-#define SYS_EXEC   10
-#define SYS_WAIT   11
-#define SYS_UPTIME 12
+#include "abi.h"
 
 /* syscall clobbers rcx and r11 */
 static inline long syscall3(long n, long a, long b, long c) {
@@ -35,3 +23,17 @@ int  fork(void);
 int  exec(const char *name, char *const argv[]);
 int  wait(int *status);
 unsigned long uptime_ms(void);
+
+int  open(const char *path, int flags);
+int  close(int fd);
+long read(int fd, void *buf, size_t len);
+long lseek(int fd, long off, int whence);
+int  stat(const char *path, struct stat *st);
+int  readdir(int fd, unsigned long index, struct dirent *d);
+int  dup2(int from, int to);
+int  pipe(int fds[2]);
+int  chdir(const char *path);
+int  getcwd(char *buf, size_t size);
+int  mkdir(const char *path);
+int  unlink(const char *path);
+int  sysinfo(int what, unsigned long index, void *buf);

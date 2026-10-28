@@ -1,0 +1,2 @@
+Hello from the FAT32 disk!
+This file lives on disk.img and survives a reboot.

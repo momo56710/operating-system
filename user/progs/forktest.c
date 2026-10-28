@@ -19,14 +19,14 @@ int main(void) {
     pid = fork();
     if (pid == 0) {
         char *argv[] = { "hello", 0 };
-        exec("hello", argv);
+        exec("/bin/hello", argv);
         printf("  exec failed!\n");
         exit(99);
     }
     wait(&status);
     printf("parent: exec'd child exited with %d (hello returns 42)\n", status);
 
-    int bad = exec("no-such-program", 0);
+    int bad = exec("/bin/no-such-program", 0);
     printf("parent: exec of a missing program returned %d (expected -1)\n", bad);
 
     printf("parent: starting 8 children at once\n");

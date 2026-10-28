@@ -11,7 +11,7 @@ static const char normal[58] __attribute__((nonstring)) =
 static const char shifted[58] __attribute__((nonstring)) =
     "\0\0" "!@#$%^&*()_+" "\b\t" "QWERTYUIOP{}" "\n\0" "ASDFGHJKL:\"~" "\0|" "ZXCVBNM<>?" "\0*\0 ";
 
-static int shift, caps;
+static int shift, caps, ctrl;
 
 /* Typed characters wait here until a task reads them with kbd_getc(). */
 #define QSIZE 128
@@ -42,6 +42,7 @@ static void keyboard_irq(void) {
     sc &= 0x7F;
 
     if (sc == 0x2A || sc == 0x36) { shift = !release; return; }
+    if (sc == 0x1D) { ctrl = !release; return; }
     if (release) return;
     if (sc == 0x3A) { caps = !caps; return; }
     if (sc >= sizeof normal) return;
@@ -50,6 +51,7 @@ static void keyboard_irq(void) {
     if (caps && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
         c ^= 0x20;                            /* flip letter case */
     if (!c) return;
+    if (ctrl && ((c | 0x20) >= 'a' && (c | 0x20) <= 'z')) c &= 0x1F;     /* Ctrl-D is 4 */
 
     kbd_push(c);
 }

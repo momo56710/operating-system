@@ -97,6 +97,23 @@ void pmm_free_frame(uint64_t phys) {
     spin_unlock_irqrestore(&pmm_lock, f);
 }
 
+/* `count` physically contiguous frames (for DMA rings), or 0. */
+uint64_t pmm_alloc_contiguous(uint64_t count) {
+    uint64_t f = spin_lock_irqsave(&pmm_lock);
+    uint64_t result = 0, run = 0;
+    for (uint64_t frame = 256; frame < nframes && !result; frame++) {       /* skip the first MiB */
+        if (bitmap[frame / 64] & (1ULL << (frame % 64))) { run = 0; continue; }
+        if (++run == count) {
+            uint64_t first = frame - count + 1;
+            for (uint64_t i = first; i <= frame; i++) bitmap[i / 64] |= 1ULL << (i % 64);
+            free_frames -= count;
+            result = first * PAGE_SIZE;
+        }
+    }
+    spin_unlock_irqrestore(&pmm_lock, f);
+    return result;
+}
+
 uint64_t pmm_total_frames(void) { return total_frames; }
 uint64_t pmm_free_frames(void)  { return free_frames; }
 

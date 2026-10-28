@@ -6,6 +6,7 @@
 #include "kprintf.h"
 #include "vmm.h"
 #include "gdt.h"
+#include "vfs.h"
 
 #define STACK_SIZE    16384
 #define QUANTUM_TICKS 10          /* 10 ms time slice at 1000 Hz */
@@ -42,6 +43,7 @@ struct task *task_create_ex(const char *name, void (*fn)(void *), void *arg, con
     uint8_t *stack = kmalloc(STACK_SIZE);
     if (!t || !stack) panic("task_create: out of memory");
     memset(t, 0, sizeof *t);
+    t->cwd[0] = '/';
     memset(stack, 0, STACK_SIZE);     /* touch every page now: a stack must never fault on demand */
 
     /* Fake the frame switch_to() expects to pop, ending in a `ret` to the trampoline. */
@@ -63,6 +65,11 @@ struct task *task_create_ex(const char *name, void (*fn)(void *), void *arg, con
         t->brk = init->brk;
         t->mmap_next = init->mmap_next;
         t->parent = init->parent;
+        if (init->inherit) {
+            for (int i = 0; i < FD_MAX; i++)
+                if (init->inherit->fds[i]) t->fds[i] = file_dup(init->inherit->fds[i]);
+            memcpy(t->cwd, init->inherit->cwd, CWD_MAX);
+        }
     }
     t->state = TASK_READY;
     t->quantum = QUANTUM_TICKS;
@@ -172,6 +179,26 @@ void reap_zombies(void) {
         kfree(dead->stack);
         kfree(dead);
     }
+}
+
+int task_info(uint64_t index, struct si_task *out) {
+    int found = 0;
+    uint64_t flags = irq_save();
+    struct task *t = &idle_task;
+    do {
+        if (index-- == 0) {
+            out->pid = t->pid;
+            out->parent_pid = t->parent ? t->parent->pid : 0;
+            out->state = t->state;
+            out->is_user = t->pml4 != 0;
+            memcpy(out->name, t->name, sizeof out->name);
+            found = 1;
+            break;
+        }
+        t = t->next;
+    } while (t != &idle_task);
+    irq_restore(flags);
+    return found;
 }
 
 void task_print_all(void) {

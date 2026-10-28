@@ -16,3 +16,24 @@ int atoi(const char *s) {
     while (*s >= '0' && *s <= '9') v = v * 10 + (*s++ - '0');
     return neg ? -v : v;
 }
+
+int strncmp(const char *a, const char *b, size_t n) {
+    for (; n; n--, a++, b++) { if (*a != *b) return (unsigned char)*a - (unsigned char)*b; if (!*a) return 0; }
+    return 0;
+}
+char *strchr(const char *s, int c) { for (; *s; s++) if (*s == (char)c) return (char *)s; return c ? 0 : (char *)s; }
+char *strrchr(const char *s, int c) { const char *r = 0; for (; *s; s++) if (*s == (char)c) r = s; return (char *)(c ? r : s); }
+char *strstr(const char *h, const char *n) {
+    size_t nl = strlen(n);
+    if (!nl) return (char *)h;
+    for (; *h; h++) if (!strncmp(h, n, nl)) return (char *)h;
+    return 0;
+}
+char *strcat(char *d, const char *s) { strcpy(d + strlen(d), s); return d; }
+char *strncpy(char *d, const char *s, size_t n) { size_t i = 0; for (; i < n && s[i]; i++) d[i] = s[i]; for (; i < n; i++) d[i] = 0; return d; }
+void *memmove(void *d, const void *s, size_t n) {
+    unsigned char *a = d; const unsigned char *b = s;
+    if (a < b) while (n--) *a++ = *b++;
+    else { a += n; b += n; while (n--) *--a = *--b; }
+    return d;
+}

@@ -1,0 +1,54 @@
+#include "pci.h"
+#include "io.h"
+#include "kprintf.h"
+
+/* Legacy configuration access: write an address to 0xCF8, read or write the data at 0xCFC. */
+static uint32_t cfg_addr(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off) {
+    return 0x80000000u | ((uint32_t)bus << 16) | ((uint32_t)slot << 11) | ((uint32_t)func << 8) | (off & 0xFC);
+}
+
+static inline void outl(uint16_t port, uint32_t v) { __asm__ volatile ("outl %0, %1" : : "a"(v), "Nd"(port)); }
+static inline uint32_t inl(uint16_t port) { uint32_t v; __asm__ volatile ("inl %1, %0" : "=a"(v) : "Nd"(port)); return v; }
+
+uint32_t pci_read32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off) {
+    outl(0xCF8, cfg_addr(bus, slot, func, off));
+    return inl(0xCFC);
+}
+
+void pci_write32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off, uint32_t v) {
+    outl(0xCF8, cfg_addr(bus, slot, func, off));
+    outl(0xCFC, v);
+}
+
+static void for_each(void (*fn)(const struct pci_dev *, void *), void *ctx) {
+    for (int slot = 0; slot < 32; slot++) {
+        for (int func = 0; func < 8; func++) {
+            uint32_t id = pci_read32(0, slot, func, 0);
+            if ((id & 0xFFFF) == 0xFFFF) { if (!func) break; continue; }       /* nothing here */
+            uint32_t cls = pci_read32(0, slot, func, 8);
+            struct pci_dev d = { 0, slot, func, id & 0xFFFF, id >> 16, cls >> 24, (cls >> 16) & 0xFF };
+            fn(&d, ctx);
+            if (!func && !(((pci_read32(0, slot, 0, 0x0C) >> 16) & 0xFF) & 0x80)) break;   /* single-function device */
+        }
+    }
+}
+
+struct find_ctx { uint16_t vendor, device; struct pci_dev *out; int found; };
+
+static void find_cb(const struct pci_dev *d, void *c) {
+    struct find_ctx *f = c;
+    if (!f->found && d->vendor == f->vendor && d->device == f->device) { *f->out = *d; f->found = 1; }
+}
+
+int pci_find(uint16_t vendor, uint16_t device, struct pci_dev *out) {
+    struct find_ctx f = { vendor, device, out, 0 };
+    for_each(find_cb, &f);
+    return f.found ? 0 : -1;
+}
+
+static void print_cb(const struct pci_dev *d, void *c) {
+    (void)c;
+    kprintf("  pci 00:%02x.%x  %04x:%04x  class %02x.%02x\n", d->slot, d->func, d->vendor, d->device, d->class_code, d->subclass);
+}
+
+void pci_scan_print(void) { for_each(print_cb, 0); }

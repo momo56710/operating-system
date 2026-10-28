@@ -13,7 +13,6 @@ void modules_init(struct limine_module_response *r) {
         const char *path = f->path, *base = path;
         for (const char *p = path; *p; p++) if (*p == '/') base = p + 1;
         size_t len = strlen(base);
-        if (len > 4 && !strcmp(base + len - 4, ".elf")) len -= 4;
         mods[nmods].name = base;
         mods[nmods].name_len = len;
         mods[nmods].data = f->address;

@@ -3,19 +3,7 @@
 #include <stddef.h>
 #include "interrupt.h"
 
-/* System call numbers (shared with user/include/sys.h). Arguments: rdi, rsi, rdx, r10, r8, r9. */
-#define SYS_WRITE  1   /* write(fd, buf, len) -> bytes written or -1 */
-#define SYS_EXIT   2   /* exit(code) */
-#define SYS_GETPID 3
-#define SYS_YIELD  4
-#define SYS_SLEEP  5   /* sleep(ms) */
-#define SYS_BRK    6   /* brk(addr): 0 returns the current break */
-#define SYS_MMAP   7   /* mmap(len) -> anonymous zeroed memory */
-#define SYS_MUNMAP 8   /* munmap(addr, len) */
-#define SYS_FORK   9
-#define SYS_EXEC   10  /* exec(name, argv) */
-#define SYS_WAIT   11  /* wait(&status) -> child pid or -1 */
-#define SYS_UPTIME 12  /* uptime in ms */
+#include "abi.h"
 
 void syscall_init(void);
 int64_t syscall_dispatch(struct interrupt_frame *f);

@@ -10,13 +10,15 @@ endif
 
 LIMINE_DIR ?= /usr/share/limine
 QEMU       := qemu-system-x86_64
-QEMUFLAGS  := -cdrom os.iso -serial stdio -m 512M -display gtk
+comma := ,
+# a disk image, if there is one, is attached as a virtio disk
+QEMUFLAGS  := -cdrom os.iso -boot order=d -serial stdio -m 512M -display gtk $(if $(wildcard disk.img),-drive file=disk.img$(comma)if=virtio$(comma)format=raw)
 # debug and trace freeze on a reset instead of rebooting, so a triple fault stays visible
 CRASHFLAGS := -no-reboot -no-shutdown
 
 CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -ffreestanding -fno-stack-protector \
           -fno-pic -fno-pie -fno-lto -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
-          -mcmodel=kernel -m64 -Ikernel/include -MMD -MP
+          -mcmodel=kernel -m64 -Ikernel/include -Iabi -MMD -MP
 CFLAGS += $(EXTRA)
 LDFLAGS := -nostdlib -static -z max-page-size=0x1000 -T linker.ld
 
@@ -26,12 +28,23 @@ OBJS    := $(SRCS:%.c=build/%.o) $(ASMSRCS:%.asm=build/%.asm.o)
 -include $(OBJS:.o=.d)
 
 # ---- user programs: separate ELF files, no SSE (the kernel does not save FPU/SSE state yet) ----
-USER_PROGS := hello args crash forktest umem count primes fib sort tree life mandel bench
+USER_PROGS := sh ls cat echo cp rm mkdir touch wc grep head ps mem sleep uptime \
+              hello args crash forktest umem count primes fib sortdemo tree life mandel bench
 USER_CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -ffreestanding -fno-stack-protector -fno-pic -fno-pie \
-               -mno-sse -mno-sse2 -mno-mmx -mno-red-zone -m64 -Iuser/include -MMD -MP
+               -mno-sse -mno-sse2 -mno-mmx -mno-red-zone -m64 -Iuser/include -Iabi -MMD -MP
 USER_LIB_SRCS := $(wildcard user/lib/*.c)
 USER_LIB_OBJS := $(USER_LIB_SRCS:%.c=build/%.o) build/user/lib/crt0.o
-USER_ELFS := $(USER_PROGS:%=build/user/%.elf)
+# Programs that live only on the disk image (/disk/bin), not on the ramdisk
+DISK_PROGS := greet
+USER_ELFS := $(USER_PROGS:%=build/user/%.elf) $(DISK_PROGS:%=build/user/%.elf)
+
+# The ramdisk: a tar of /bin (the programs) plus whatever is under initrd/, loaded by Limine as a module.
+INITRD_FILES := $(shell find initrd -type f)
+build/initrd.tar: $(USER_ELFS) $(INITRD_FILES)
+	rm -rf build/initrd && mkdir -p build/initrd/bin build/initrd/tmp build/initrd/dev build/initrd/disk
+	cp -r initrd/. build/initrd/
+	$(foreach p,$(USER_PROGS),cp build/user/$(p).elf build/initrd/bin/$(p);)
+	tar --format=ustar --owner=0 --group=0 --numeric-owner -cf $@ -C build/initrd .
 
 build/user/lib/crt0.o: user/lib/crt0.S
 	@mkdir -p $(dir $@)
@@ -46,7 +59,7 @@ build/user/%.elf: build/user/progs/%.o $(USER_LIB_OBJS) user/user.ld
 
 -include $(wildcard build/user/*/*.d)
 
-.PHONY: all iso run debug trace clean programs
+.PHONY: all iso run debug trace clean programs disk disk-reset
 programs: $(USER_ELFS)
 all: kernel.elf
 
@@ -62,12 +75,12 @@ kernel.elf: $(OBJS) linker.ld
 	$(LD) $(LDFLAGS) $(OBJS) -o $@
 
 iso: os.iso
-os.iso: kernel.elf limine.conf assets/splash.png $(USER_ELFS)
+os.iso: kernel.elf limine.conf assets/splash.png build/initrd.tar
 	rm -rf iso_root && mkdir -p iso_root/boot/limine iso_root/EFI/BOOT
 	cp kernel.elf iso_root/boot/kernel.elf
 	cp limine.conf assets/splash.png iso_root/boot/limine/
-	mkdir -p iso_root/boot/user && cp $(USER_ELFS) iso_root/boot/user/
-	$(foreach p,$(USER_PROGS),echo '    module_path: boot():/boot/user/$(p).elf' >> iso_root/boot/limine/limine.conf;)
+	cp build/initrd.tar iso_root/boot/initrd.tar
+	echo '    module_path: boot():/boot/initrd.tar' >> iso_root/boot/limine/limine.conf
 	cp $(LIMINE_DIR)/limine-bios.sys $(LIMINE_DIR)/limine-bios-cd.bin \
 	   $(LIMINE_DIR)/limine-uefi-cd.bin iso_root/boot/limine/
 	cp $(LIMINE_DIR)/BOOTX64.EFI iso_root/EFI/BOOT/
@@ -78,7 +91,20 @@ os.iso: kernel.elf limine.conf assets/splash.png $(USER_ELFS)
 	    iso_root -o os.iso
 	limine bios-install os.iso
 
-run: os.iso
+# disk.img is built only if missing, so what you save on it survives rebuilds; `make disk-reset` starts over
+DISK_FILES := $(shell find diskfiles -type f)
+disk.img:
+	rm -rf build/diskroot && mkdir -p build/diskroot/bin && cp -r diskfiles/. build/diskroot/
+	$(foreach p,$(DISK_PROGS),cp build/user/$(p).elf build/diskroot/bin/$(p);)
+	python3 tools/mkfat32.py disk.img 64 build/diskroot
+
+disk: $(USER_ELFS) disk.img
+
+disk-reset: $(USER_ELFS)
+	rm -f disk.img
+	$(MAKE) disk.img
+
+run: os.iso disk.img
 	$(QEMU) $(QEMUFLAGS)
 
 debug: os.iso

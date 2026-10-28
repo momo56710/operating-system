@@ -9,6 +9,7 @@
 #include "panic.h"
 #include "spinlock.h"
 #include "string.h"
+#include "vfs.h"
 
 #define PAGE        4096ULL
 #define STACK_TOP   0x00007FFFFFFFF000ULL     /* just above the highest stack byte; the page above stays unmapped */
@@ -16,7 +17,7 @@
 #define MMAP_BASE   0x0000000100000000ULL
 #define MMAP_MAX    (256ULL << 20)            /* per call */
 #define BRK_LIMIT   0x00000000F0000000ULL
-#define ARGS_MAX    16
+#define ARGS_MAX    32
 
 extern void enter_user(uint64_t rip, uint64_t rsp) __attribute__((noreturn));
 extern void resume_user(struct interrupt_frame *f) __attribute__((noreturn));
@@ -76,21 +77,51 @@ static int build_user_stack(uint64_t pml4, char *const argv[], uint64_t *rsp_out
     return 0;
 }
 
-/* Builds a complete address space for `name`; the three out-parameters are valid on success. */
-static uint64_t load_program(const char *name, char *const argv[],
+#define MAX_PROGRAM (8ULL << 20)
+
+/* Read a whole executable into kernel memory. `path` is relative to the caller's working directory. */
+static void *read_program(const char *path, size_t *size) {
+    char abs[PATH_MAX_LEN];
+    if (vfs_normalize(current_task()->cwd, path, abs, sizeof abs) < 0) return 0;
+    struct file *f = file_open(abs, O_RDONLY);
+    if (!f) return 0;
+    uint64_t total = file_size(f);
+    void *buf = 0;
+    if (f->vn->type == FT_FILE && total && total <= MAX_PROGRAM && (buf = kmalloc(total))) {
+        uint64_t got = 0;
+        while (got < total) {
+            int64_t r = file_read(f, (uint8_t *)buf + got, total - got);
+            if (r <= 0) break;
+            got += r;
+        }
+        if (got != total) { kfree(buf); buf = 0; }
+    }
+    file_close(f);
+    if (buf) *size = total;
+    return buf;
+}
+
+/* Builds a complete address space for the executable at `path`; the three out-parameters
+ * are valid on success. */
+static uint64_t load_program(const char *path, char *const argv[],
                              uint64_t *entry, uint64_t *rsp, uint64_t *image_end) {
     size_t size;
-    const void *img = module_find(name, &size);
+    void *img = read_program(path, &size);
     if (!img) return 0;
     uint64_t pml4 = vmm_new_space();
-    if (!pml4) return 0;
-    if (elf_load(pml4, img, size, entry, image_end) < 0 ||
-        map_stack(pml4) < 0 ||
-        build_user_stack(pml4, argv, rsp) < 0) {
-        vmm_free_space(pml4);
-        return 0;
-    }
+    if (!pml4) { kfree(img); return 0; }
+    int bad = elf_load(pml4, img, size, entry, image_end) < 0 ||
+              map_stack(pml4) < 0 ||
+              build_user_stack(pml4, argv, rsp) < 0;
+    kfree(img);
+    if (bad) { vmm_free_space(pml4); return 0; }
     return pml4;
+}
+
+static const char *base_name(const char *path) {
+    const char *b = path;
+    for (const char *p = path; *p; p++) if (*p == '/') b = p + 1;
+    return b;
 }
 
 struct start_info { uint64_t entry, rsp; };
@@ -101,20 +132,22 @@ static void user_start(void *arg) {
     enter_user(si.entry, si.rsp);
 }
 
-long process_spawn(const char *name, char *const argv[]) {
+long process_spawn(const char *path, char *const argv[]) {
     uint64_t entry, rsp, end;
-    uint64_t pml4 = load_program(name, argv, &entry, &rsp, &end);
+    uint64_t pml4 = load_program(path, argv, &entry, &rsp, &end);
     if (!pml4) return -1;
     struct start_info *si = kmalloc(sizeof *si);
     if (!si) { vmm_free_space(pml4); return -1; }
     si->entry = entry;
     si->rsp = rsp;
-    struct task_init ti = { pml4, end, end, MMAP_BASE, current_task() };
-    return (long)task_create_ex(name, user_start, si, &ti)->pid;
+    struct task_init ti = { pml4, end, end, MMAP_BASE, current_task(), current_task() };
+    return (long)task_create_ex(base_name(path), user_start, si, &ti)->pid;
 }
 
 void process_exit(int code) {
     struct task *t = current_task();
+    for (int i = 0; i < FD_MAX; i++)             /* closing the last write end of a pipe is what lets its reader see end of file */
+        if (t->fds[i]) { file_close(t->fds[i]); t->fds[i] = 0; }
     irq_save();
     uint64_t pml4 = t->pml4;
     task_use_kernel_space();          /* never free the page tables the CPU is using */
@@ -180,14 +213,14 @@ long process_fork(struct interrupt_frame *f) {
     if (!copy) { vmm_free_space(pml4); return -1; }
     *copy = *f;
     copy->rax = 0;                    /* fork returns 0 in the child */
-    struct task_init ti = { pml4, me->brk_start, me->brk, me->mmap_next, me };
+    struct task_init ti = { pml4, me->brk_start, me->brk, me->mmap_next, me, me };
     return (long)task_create_ex(me->name, fork_child, copy, &ti)->pid;
 }
 
-long process_exec(const char *name, char *const argv[], struct interrupt_frame *f) {
+long process_exec(const char *path, char *const argv[], struct interrupt_frame *f) {
     struct task *me = current_task();
     uint64_t entry, rsp, end;
-    uint64_t pml4 = load_program(name, argv, &entry, &rsp, &end);
+    uint64_t pml4 = load_program(path, argv, &entry, &rsp, &end);
     if (!pml4) return -1;             /* the old image is untouched */
 
     uint64_t flags = irq_save();
@@ -199,7 +232,8 @@ long process_exec(const char *name, char *const argv[], struct interrupt_frame *
 
     me->brk_start = me->brk = end;
     me->mmap_next = MMAP_BASE;
-    for (int i = 0; i < 15; i++) me->name[i] = name[i];
+    const char *nm = base_name(path);
+    for (int i = 0; i < 15; i++) me->name[i] = nm[i];
     me->name[15] = 0;
 
     memset(f, 0, sizeof *f);          /* a fresh register state for the new program */
