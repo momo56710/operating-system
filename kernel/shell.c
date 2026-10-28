@@ -66,15 +66,20 @@ static void cmd_progs(int argc, char **argv) {
     }
 }
 
-/* run <program> [args...]: start a user program and wait for it to finish. */
-static void cmd_run(int argc, char **argv) {
-    if (argc < 2) { kprintf("usage: run <program> [args...]   (see progs)\n"); return; }
-    long pid = process_spawn(argv[1], &argv[1]);
-    if (pid < 0) { kprintf("run: cannot start '%s'\n", argv[1]); return; }
+/* Start a user program (argv[0] is its name) and wait for it to finish. */
+static void run_program(char **argv) {
+    long pid = process_spawn(argv[0], argv);
+    if (pid < 0) { kprintf("cannot start '%s'\n", argv[0]); return; }
     int status = 0;
     process_wait(&status);
     if (status >= PROC_FAULT_BASE) kprintf("[process %ld killed by exception %d]\n", pid, status - PROC_FAULT_BASE);
     else                           kprintf("[process %ld exited with status %d]\n", pid, status);
+}
+
+/* run <program> [args...] */
+static void cmd_run(int argc, char **argv) {
+    if (argc < 2) { kprintf("usage: run <program> [args...]   (see progs)\n"); return; }
+    run_program(&argv[1]);
 }
 
 static void cmd_ps(int argc, char **argv) { (void)argc; (void)argv; task_print_all(); }
@@ -122,6 +127,7 @@ static void run_line(char *line) {
     argv[argc] = 0;
     for (unsigned i = 0; i < NCOMMANDS; i++)
         if (!strcmp(argv[0], commands[i].name)) { commands[i].fn(argc, argv); return; }
+    if (module_find(argv[0], 0)) { run_program(argv); return; }     /* a bare program name works too */
     kprintf("unknown command: %s (try help)\n", argv[0]);
 }
 

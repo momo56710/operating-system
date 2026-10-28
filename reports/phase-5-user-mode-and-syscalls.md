@@ -77,3 +77,21 @@ A user program written in C, compiled separately, loads as an ELF, prints text t
 
 ## Test commands
 `make programs` builds only the user programs. In the shell: `progs`, `run hello`, `run args a b c`, `run crash <1-9>`, `run forktest`, `run umem`.
+
+## Addendum: demo programs (same day)
+Eight more programs in `user/progs/`, all built into the ISO. Since version 5 the shell also accepts a bare program name (`primes 1000000`), not only `run primes 1000000`.
+
+| Program | What it shows | Verified output |
+|---|---|---|
+| `count [n] [ms]` | sleeping, arguments, uptime | ticks 400 ms apart |
+| `primes [limit]` | `malloc` of a large array, 64-bit maths | 9592 primes up to 100000, 78498 up to 1000000 (both correct) |
+| `fib [n]` | recursion, 64-bit overflow limits | fib(27) = 196418, fib(90) = 2880067194370816120 |
+| `sort [n]` | quicksort on 50k-200k numbers, self-checking | `ORDER OK`, 12 ms for 50k |
+| `tree [depth]` | recursive fork, many processes, wait/exit codes | depth 3: 15 processes, depth 4: 31, counts match |
+| `life [gens]` | Game of Life, a glider moving | 5 cells alive every generation |
+| `mandel` | Mandelbrot in ASCII with 16.16 fixed-point maths (no floats) | the expected shape |
+| `bench` | CPU loop, syscall rate, fork+wait, malloc, brk | 50M iterations 147 ms, 100k getpid 37 ms, 200 fork+exit+wait 293 ms |
+
+Memory stayed flat through repeated `tree 3` and `tree 4` runs (free frames identical every time). The kernel heap's address range grows to match the largest burst of tasks (768 KiB after `tree 4`) but its pages are returned.
+
+Timings use the kernel's own tick counter under QEMU's emulation, so they say how the pieces compare to each other, not how fast real hardware would be.

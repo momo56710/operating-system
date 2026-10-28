@@ -26,7 +26,7 @@ OBJS    := $(SRCS:%.c=build/%.o) $(ASMSRCS:%.asm=build/%.asm.o)
 -include $(OBJS:.o=.d)
 
 # ---- user programs: separate ELF files, no SSE (the kernel does not save FPU/SSE state yet) ----
-USER_PROGS := hello args crash forktest umem
+USER_PROGS := hello args crash forktest umem count primes fib sort tree life mandel bench
 USER_CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -ffreestanding -fno-stack-protector -fno-pic -fno-pie \
                -mno-sse -mno-sse2 -mno-mmx -mno-red-zone -m64 -Iuser/include -MMD -MP
 USER_LIB_SRCS := $(wildcard user/lib/*.c)
