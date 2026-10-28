@@ -6,12 +6,14 @@
 #include "heap.h"
 #include "string.h"
 #include "io.h"
+#include "modules.h"
+#include "process.h"
 
 /* A stand-in shell that lives in the kernel. It is replaced in Phase 6 by a real
  * userspace shell that launches programs from disk. */
 
 #define LINE_MAX 128
-#define ARGS_MAX 8
+#define ARGS_MAX 8     /* argv has room for a terminating NULL on top of this */
 
 static unsigned long parse_ulong(const char *s, int *ok) {
     unsigned long v = 0;
@@ -55,6 +57,26 @@ static void cmd_meminfo(int argc, char **argv) {
     kprintf("heap:     %lu KiB mapped span, %lu B in use, %lu B free\n", span >> 10, used, fr);
 }
 
+static void cmd_progs(int argc, char **argv) {
+    (void)argc; (void)argv;
+    for (size_t i = 0; i < module_count(); i++) {
+        kprintf("  ");
+        kwrite(module_name(i), module_name_len(i));
+        kprintf("\n");
+    }
+}
+
+/* run <program> [args...]: start a user program and wait for it to finish. */
+static void cmd_run(int argc, char **argv) {
+    if (argc < 2) { kprintf("usage: run <program> [args...]   (see progs)\n"); return; }
+    long pid = process_spawn(argv[1], &argv[1]);
+    if (pid < 0) { kprintf("run: cannot start '%s'\n", argv[1]); return; }
+    int status = 0;
+    process_wait(&status);
+    if (status >= PROC_FAULT_BASE) kprintf("[process %ld killed by exception %d]\n", pid, status - PROC_FAULT_BASE);
+    else                           kprintf("[process %ld exited with status %d]\n", pid, status);
+}
+
 static void cmd_ps(int argc, char **argv) { (void)argc; (void)argv; task_print_all(); }
 
 static void cmd_reboot(int argc, char **argv) {
@@ -74,6 +96,8 @@ static const struct command commands[] = {
     { "sleep",   "sleep <ms>: wait, then say so",    cmd_sleep },
     { "meminfo", "physical memory and heap usage",   cmd_meminfo },
     { "ps",      "list tasks and their states",      cmd_ps },
+    { "progs",   "list the user programs",           cmd_progs },
+    { "run",     "run <prog> [args]: run a program", cmd_run },
     { "reboot",  "reset the machine",                cmd_reboot },
 };
 #define NCOMMANDS (sizeof commands / sizeof commands[0])
@@ -85,7 +109,7 @@ static void cmd_help(int argc, char **argv) {
 }
 
 static void run_line(char *line) {
-    char *argv[ARGS_MAX];
+    char *argv[ARGS_MAX + 1];
     int argc = 0;
     for (char *p = line; *p; ) {
         while (*p == ' ') *p++ = 0;
@@ -95,6 +119,7 @@ static void run_line(char *line) {
         while (*p && *p != ' ') p++;
     }
     if (!argc) return;
+    argv[argc] = 0;
     for (unsigned i = 0; i < NCOMMANDS; i++)
         if (!strcmp(argv[0], commands[i].name)) { commands[i].fn(argc, argv); return; }
     kprintf("unknown command: %s (try help)\n", argv[0]);

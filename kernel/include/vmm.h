@@ -23,3 +23,15 @@ uint64_t vmm_translate(uint64_t virt);    /* physical address, or 0 if unmapped 
 void vmm_lazy_region(uint64_t base, uint64_t len, uint64_t flags);
 void vmm_lazy_set_len(uint64_t base, uint64_t len);
 int  vmm_handle_fault(uint64_t addr, uint64_t error);   /* 1 = fixed, retry the access */
+
+/* Per-process address spaces. The upper half (kernel) is shared; the lower half is private. */
+#define USER_MAX 0x0000800000000000ULL     /* first address user code may NOT touch */
+
+uint64_t vmm_kernel_pml4(void);
+void     vmm_switch(uint64_t pml4);                                       /* load CR3 */
+uint64_t vmm_new_space(void);
+void     vmm_free_space(uint64_t pml4);                                   /* frees all user pages too */
+uint64_t vmm_clone_space(uint64_t src);                                   /* for fork; 0 = out of memory */
+int      vmm_map_in(uint64_t pml4, uint64_t virt, uint64_t phys, uint64_t flags);
+uint64_t vmm_unmap_in(uint64_t pml4, uint64_t virt);
+uint64_t vmm_lookup(uint64_t pml4, uint64_t virt, uint64_t *flags);       /* phys or 0 */

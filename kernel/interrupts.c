@@ -2,6 +2,7 @@
 #include "pic.h"
 #include "apic.h"
 #include "task.h"
+#include "process.h"
 #include "io.h"
 #include "kprintf.h"
 #include "vmm.h"
@@ -58,6 +59,8 @@ void interrupt_handler(struct interrupt_frame *f) {
     if (f->vector == 14 && vmm_handle_fault(read_cr(2), f->error))
         return;                               /* a lazily mapped page: retry the access */
     if (f->vector < 32) {
+        if (f->cs & 3)                          /* a user program misbehaved: kill it, not the kernel */
+            process_fault(f, exception_names[f->vector]);
         exception(f);
     } else if (f->vector == VEC_TIMER) {
         irq_eoi();                            /* before switching tasks, or the APIC stays blocked */

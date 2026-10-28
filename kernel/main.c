@@ -16,6 +16,8 @@
 #include "task.h"
 #include "spinlock.h"
 #include "shell.h"
+#include "modules.h"
+#include "syscall.h"
 
 __attribute__((used, section(".limine_requests_start")))
 static volatile uint64_t requests_start[] = LIMINE_REQUESTS_START_MARKER;
@@ -46,6 +48,11 @@ static volatile struct limine_executable_address_request exec_request = {
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_rsdp_request rsdp_request = {
     .id = LIMINE_RSDP_REQUEST_ID, .revision = 0
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_module_request module_request = {
+    .id = LIMINE_MODULE_REQUEST_ID, .revision = 0
 };
 
 __attribute__((used, section(".limine_requests_end")))
@@ -117,6 +124,9 @@ void kmain(void) {
     kprintf("IDT loaded (256 vectors)\n");
     pic_init();
     kprintf("Legacy PIC remapped and masked\n");
+    syscall_init();
+    modules_init(module_request.response);
+    kprintf("syscall enabled, %lu boot module(s)\n", (unsigned long)module_count());
 
     pmm_init(memmap_request.response, hhdm);
     pmm_print_stats();

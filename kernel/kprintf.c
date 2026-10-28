@@ -19,6 +19,12 @@ void kputc(char c) {
     spin_unlock_irqrestore(&print_lock, f);
 }
 
+void kwrite(const char *buf, unsigned long n) {
+    uint64_t f = spin_lock_irqsave(&print_lock);
+    for (unsigned long i = 0; i < n; i++) putc_raw(buf[i]);
+    spin_unlock_irqrestore(&print_lock, f);
+}
+
 void kclear(void) {
     uint64_t f = spin_lock_irqsave(&print_lock);
     serial_puts("\x1b[2J\x1b[H");

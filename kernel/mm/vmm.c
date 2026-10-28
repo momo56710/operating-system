@@ -75,8 +75,8 @@ static int map_in(uint64_t pml4, uint64_t virt, uint64_t phys, uint64_t flags, i
     return 0;
 }
 
-static uint64_t *leaf(uint64_t virt, int *is_large) {
-    uint64_t pdpt = next_level(table(kernel_pml4), IDX4(virt), 0, 0);
+static uint64_t *leaf(uint64_t pml4, uint64_t virt, int *is_large) {
+    uint64_t pdpt = next_level(table(pml4), IDX4(virt), 0, 0);
     if (!pdpt) return 0;
     uint64_t pd = next_level(table(pdpt), IDX3(virt), 0, 0);
     if (!pd) return 0;
@@ -100,7 +100,7 @@ int vmm_map(uint64_t virt, uint64_t phys, uint64_t flags) {
 uint64_t vmm_unmap(uint64_t virt) {
     uint64_t f = spin_lock_irqsave(&vmm_lock);
     int large;
-    uint64_t *e = leaf(virt, &large);
+    uint64_t *e = leaf(kernel_pml4, virt, &large);
     uint64_t phys = 0;
     if (e && !large) {
         phys = *e & PTE_ADDR;
@@ -114,7 +114,7 @@ uint64_t vmm_unmap(uint64_t virt) {
 uint64_t vmm_translate(uint64_t virt) {
     uint64_t f = spin_lock_irqsave(&vmm_lock);
     int large;
-    uint64_t *e = leaf(virt, &large);
+    uint64_t *e = leaf(kernel_pml4, virt, &large);
     uint64_t r = 0;
     if (e) r = large ? (*e & PTE_ADDR & ~(SIZE_2M - 1)) | (virt & (SIZE_2M - 1))
                      : (*e & PTE_ADDR) | (virt & (SIZE_4K - 1));
@@ -168,7 +168,127 @@ void vmm_init(struct limine_memmap_response *mm,
     map_kernel_range(__rodata_start, __rodata_end, VMM_NX,                    exec);   /* r-- */
     map_kernel_range(__data_start,   __data_end,   VMM_WRITE | VMM_NX,        exec);   /* rw- */
 
+    /* Give every kernel-half PML4 slot a table now. Process page tables copy these 256 entries,
+     * so anything the kernel maps later is visible in every address space automatically. */
+    for (int i = 256; i < 512; i++)
+        if (!(table(kernel_pml4)[i] & PTE_P))
+            table(kernel_pml4)[i] = new_table() | PTE_P | VMM_WRITE;
+
     __asm__ volatile ("mov %0, %%cr3" : : "r"(kernel_pml4) : "memory");
+}
+
+/* ---- per-process address spaces (the lower half; the upper half is shared) ---- */
+
+uint64_t vmm_kernel_pml4(void) { return kernel_pml4; }
+
+void vmm_switch(uint64_t pml4) {
+    __asm__ volatile ("mov %0, %%cr3" : : "r"(pml4) : "memory");
+}
+
+static uint64_t current_cr3(void) {
+    uint64_t v;
+    __asm__ volatile ("mov %%cr3, %0" : "=r"(v));
+    return v;
+}
+
+uint64_t vmm_new_space(void) {
+    uint64_t pml4 = new_table();
+    for (int i = 256; i < 512; i++) table(pml4)[i] = table(kernel_pml4)[i];
+    return pml4;
+}
+
+int vmm_map_in(uint64_t pml4, uint64_t virt, uint64_t phys, uint64_t flags) {
+    uint64_t f = spin_lock_irqsave(&vmm_lock);
+    int r = map_in(pml4, virt, phys, flags, 0);
+    if (r == 0 && pml4 == (current_cr3() & PTE_ADDR)) invlpg(virt);
+    spin_unlock_irqrestore(&vmm_lock, f);
+    return r;
+}
+
+uint64_t vmm_unmap_in(uint64_t pml4, uint64_t virt) {
+    uint64_t f = spin_lock_irqsave(&vmm_lock);
+    int large;
+    uint64_t *e = leaf(pml4, virt, &large);
+    uint64_t phys = 0;
+    if (e && !large) {
+        phys = *e & PTE_ADDR;
+        *e = 0;
+        if (pml4 == (current_cr3() & PTE_ADDR)) invlpg(virt);
+    }
+    spin_unlock_irqrestore(&vmm_lock, f);
+    return phys;
+}
+
+/* Physical address of a mapped page in `pml4`, or 0. `flags` (optional) gets the PTE's
+ * low flag bits plus NX, so callers can check user/write permission. */
+uint64_t vmm_lookup(uint64_t pml4, uint64_t virt, uint64_t *flags) {
+    uint64_t f = spin_lock_irqsave(&vmm_lock);
+    int large;
+    uint64_t *e = leaf(pml4, virt, &large);
+    uint64_t r = 0;
+    if (e && !large) {
+        r = *e & PTE_ADDR;
+        if (flags) *flags = *e & (0xFFFULL | VMM_NX);
+    }
+    spin_unlock_irqrestore(&vmm_lock, f);
+    return r;
+}
+
+/* Free every user page and every user-half table, then the PML4 itself. */
+void vmm_free_space(uint64_t pml4) {
+    uint64_t *l4 = table(pml4);
+    for (int i4 = 0; i4 < 256; i4++) {
+        if (!(l4[i4] & PTE_P)) continue;
+        uint64_t *l3 = table(l4[i4] & PTE_ADDR);
+        for (int i3 = 0; i3 < 512; i3++) {
+            if (!(l3[i3] & PTE_P)) continue;
+            uint64_t *l2 = table(l3[i3] & PTE_ADDR);
+            for (int i2 = 0; i2 < 512; i2++) {
+                if (!(l2[i2] & PTE_P)) continue;
+                uint64_t *l1 = table(l2[i2] & PTE_ADDR);
+                for (int i1 = 0; i1 < 512; i1++)
+                    if (l1[i1] & PTE_P) pmm_free_frame(l1[i1] & PTE_ADDR);
+                pmm_free_frame(l2[i2] & PTE_ADDR);
+            }
+            pmm_free_frame(l3[i3] & PTE_ADDR);
+        }
+        pmm_free_frame(l4[i4] & PTE_ADDR);
+    }
+    pmm_free_frame(pml4);
+}
+
+/* Copy a whole user address space (fork). Pages are copied eagerly; copy-on-write would
+ * avoid the copies and is a later improvement. Returns the new PML4, or 0 if out of memory. */
+uint64_t vmm_clone_space(uint64_t src) {
+    uint64_t dst = vmm_new_space();
+    uint64_t *l4 = table(src);
+    for (int i4 = 0; i4 < 256; i4++) {
+        if (!(l4[i4] & PTE_P)) continue;
+        uint64_t *l3 = table(l4[i4] & PTE_ADDR);
+        for (int i3 = 0; i3 < 512; i3++) {
+            if (!(l3[i3] & PTE_P)) continue;
+            uint64_t *l2 = table(l3[i3] & PTE_ADDR);
+            for (int i2 = 0; i2 < 512; i2++) {
+                if (!(l2[i2] & PTE_P)) continue;
+                uint64_t *l1 = table(l2[i2] & PTE_ADDR);
+                for (int i1 = 0; i1 < 512; i1++) {
+                    if (!(l1[i1] & PTE_P)) continue;
+                    uint64_t va = ((uint64_t)i4 << 39) | ((uint64_t)i3 << 30) |
+                                  ((uint64_t)i2 << 21) | ((uint64_t)i1 << 12);
+                    uint64_t frame = pmm_alloc_frame();
+                    if (!frame) { vmm_free_space(dst); return 0; }
+                    memcpy(table(frame), table(l1[i1] & PTE_ADDR), PAGE_SIZE);
+                    uint64_t flags = l1[i1] & (0xFFFULL | VMM_NX) & ~1ULL;
+                    if (vmm_map_in(dst, va, frame, flags) < 0) {
+                        pmm_free_frame(frame);
+                        vmm_free_space(dst);
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+    return dst;
 }
 
 void vmm_lazy_region(uint64_t base, uint64_t len, uint64_t flags) {
@@ -182,7 +302,7 @@ void vmm_lazy_set_len(uint64_t base, uint64_t len) {
 }
 
 int vmm_handle_fault(uint64_t addr, uint64_t error) {
-    if (error & 1) return 0;                    /* protection violation: never a lazy page */
+    if (error & (1 | 4)) return 0;              /* protection violation or a user-mode access: never lazy */
     for (int i = 0; i < nlazy; i++) {
         if (addr < lazy[i].base || addr >= lazy[i].base + lazy[i].len) continue;
         uint64_t phys = pmm_alloc_frame();

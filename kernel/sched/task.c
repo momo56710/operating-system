@@ -4,6 +4,8 @@
 #include "string.h"
 #include "panic.h"
 #include "kprintf.h"
+#include "vmm.h"
+#include "gdt.h"
 
 #define STACK_SIZE    16384
 #define QUANTUM_TICKS 10          /* 10 ms time slice at 1000 Hz */
@@ -15,6 +17,9 @@ static struct task idle_task;     /* the boot context: pid 0, runs only when not
 static struct task *current = &idle_task;
 static uint64_t next_pid = 1;
 static volatile uint64_t ticks;
+static uint64_t loaded_pml4;
+
+extern uint64_t syscall_kstack;   /* arch/x86_64/syscall.c: where `syscall` puts the kernel stack */
 
 struct task *current_task(void) { return current; }
 uint64_t uptime_ms(void) { return ticks; }
@@ -24,10 +29,15 @@ void sched_init(void) {
     idle_task.state = TASK_RUNNING;
     idle_task.next = &idle_task;
     idle_task.quantum = QUANTUM_TICKS;
+    loaded_pml4 = vmm_kernel_pml4();
     memcpy(idle_task.name, "idle", 5);
 }
 
 struct task *task_create(const char *name, void (*fn)(void *), void *arg) {
+    return task_create_ex(name, fn, arg, 0);
+}
+
+struct task *task_create_ex(const char *name, void (*fn)(void *), void *arg, const struct task_init *init) {
     struct task *t = kmalloc(sizeof *t);
     uint8_t *stack = kmalloc(STACK_SIZE);
     if (!t || !stack) panic("task_create: out of memory");
@@ -46,6 +56,14 @@ struct task *task_create(const char *name, void (*fn)(void *), void *arg) {
 
     t->rsp = (uint64_t)sp;
     t->stack = stack;
+    t->kstack_top = (uint64_t)stack + STACK_SIZE;
+    if (init) {
+        t->pml4 = init->pml4;
+        t->brk_start = init->brk_start;
+        t->brk = init->brk;
+        t->mmap_next = init->mmap_next;
+        t->parent = init->parent;
+    }
     t->state = TASK_READY;
     t->quantum = QUANTUM_TICKS;
     for (int i = 0; i < 15 && name[i]; i++) t->name[i] = name[i];
@@ -77,6 +95,12 @@ void schedule(void) {                 /* interrupts are off */
     next->quantum = QUANTUM_TICKS;
     if (next == prev) return;
     current = next;
+    if (next->kstack_top) {                       /* ring 3 -> ring 0 entries land on this stack */
+        tss_set_rsp0(next->kstack_top);
+        syscall_kstack = next->kstack_top;
+    }
+    uint64_t want = next->pml4 ? next->pml4 : vmm_kernel_pml4();
+    if (want != loaded_pml4) { vmm_switch(want); loaded_pml4 = want; }
     switch_to(&prev->rsp, next->rsp);
 }
 
@@ -103,8 +127,34 @@ void sleep_ms(uint64_t ms) {
     irq_restore(flags);
 }
 
+void task_set_space(uint64_t pml4) {
+    loaded_pml4 = pml4;
+    vmm_switch(pml4);
+}
+
+void task_use_kernel_space(void) {
+    task_set_space(vmm_kernel_pml4());
+}
+
+/* First child (any, or only one that already exited) of `parent`, or 0. Interrupts must be off. */
+struct task *task_find_child(struct task *parent, int defunct_only) {
+    for (struct task *t = idle_task.next; t != &idle_task; t = t->next)
+        if (t->parent == parent && (!defunct_only || t->state == TASK_DEFUNCT)) return t;
+    return 0;
+}
+
+/* The parent is going away: children become parentless, and already-finished ones can be freed. */
+void task_orphan_children(struct task *parent) {
+    for (struct task *t = idle_task.next; t != &idle_task; t = t->next) {
+        if (t->parent != parent) continue;
+        t->parent = 0;
+        if (t->state == TASK_DEFUNCT) t->state = TASK_ZOMBIE;
+    }
+}
+
 void task_exit(void) {
     irq_save();
+    task_orphan_children(current);
     current->state = TASK_ZOMBIE;
     schedule();
     panic("a zombie task was scheduled again");
@@ -125,7 +175,7 @@ void reap_zombies(void) {
 }
 
 void task_print_all(void) {
-    static const char *names[] = { "running", "ready", "sleeping", "blocked", "zombie" };
+    static const char *names[] = { "running", "ready", "sleeping", "blocked", "zombie", "defunct" };
     kprintf("PID  STATE     NAME\n");
     uint64_t flags = irq_save();
     struct task *t = &idle_task;
