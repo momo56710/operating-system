@@ -2,6 +2,7 @@
 #include "pic.h"
 #include "io.h"
 #include "kprintf.h"
+#include "vmm.h"
 
 static const char *exception_names[32] = {
     "Divide error", "Debug", "NMI", "Breakpoint", "Overflow", "Bound range exceeded",
@@ -51,6 +52,8 @@ static void exception(struct interrupt_frame *f) {
 }
 
 void interrupt_handler(struct interrupt_frame *f) {
+    if (f->vector == 14 && vmm_handle_fault(read_cr(2), f->error))
+        return;                               /* a lazily mapped page: retry the access */
     if (f->vector < 32) {
         exception(f);
     } else if (f->vector < IRQ_BASE + 16) {
