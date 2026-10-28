@@ -1,20 +1,60 @@
-/* Phase 0 stub: proves the bootloader hands off to our code.
- * Replaced by the real serial driver and kprintf in Phase 1. */
+#include "limine.h"
+#include "serial.h"
+#include "fb.h"
+#include "kprintf.h"
+#include "panic.h"
 
-static inline void outb(unsigned short port, unsigned char val) {
-    __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
-}
+__attribute__((used, section(".limine_requests_start")))
+static volatile uint64_t requests_start[] = LIMINE_REQUESTS_START_MARKER;
 
-static void serial_puts(const char *s) {
-    while (*s) outb(0x3F8, (unsigned char)*s++);
-}
+__attribute__((used, section(".limine_requests")))
+static volatile uint64_t base_revision[] = LIMINE_BASE_REVISION(5);
 
-/* Keeps the .data segment non-empty so the ELF has a valid rw- PT_LOAD.
- * Goes away in Phase 1 when the Limine request block lives in .data. */
-static volatile int boot_marker = 1;
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_framebuffer_request fb_request = {
+    .id = LIMINE_FRAMEBUFFER_REQUEST_ID, .revision = 0
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_hhdm_request hhdm_request = {
+    .id = LIMINE_HHDM_REQUEST_ID, .revision = 0
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_memmap_request memmap_request = {
+    .id = LIMINE_MEMMAP_REQUEST_ID, .revision = 0
+};
+
+__attribute__((used, section(".limine_requests_end")))
+static volatile uint64_t requests_end[] = LIMINE_REQUESTS_END_MARKER;
 
 void kmain(void) {
-    boot_marker++;
-    serial_puts("LeOS: kernel reached, halting\n");
+    serial_init();
+
+    if (!LIMINE_BASE_REVISION_SUPPORTED(base_revision))
+        panic("bootloader does not support the requested protocol revision");
+
+    if (fb_request.response && fb_request.response->framebuffer_count > 0)
+        fb_init(fb_request.response->framebuffers[0]);
+    else
+        kprintf("(no framebuffer, serial only)\n");
+
+    kprintf("LeOS booting...\n");
+    kprintf("hello %d\n", 42);
+
+    if (hhdm_request.response)
+        kprintf("HHDM offset: %p\n", (void *)hhdm_request.response->offset);
+    if (memmap_request.response)
+        kprintf("Memory map entries: %lu\n", memmap_request.response->entry_count);
+
+#ifdef SCROLL_TEST
+    for (int i = 0; i < 70; i++) kprintf("scroll test line %d\n", i);
+#endif
+
+#ifdef PANIC_TEST
+    panic("test panic, value=%d", 1234);
+#endif
+
+    kprintf("Boot complete, halting.\n");
     for (;;) __asm__ volatile ("hlt");
 }

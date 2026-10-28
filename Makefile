@@ -10,15 +10,17 @@ endif
 
 LIMINE_DIR ?= /usr/share/limine
 QEMU       := qemu-system-x86_64
-QEMUFLAGS  := -cdrom os.iso -serial stdio -no-reboot -no-shutdown -m 512M
+QEMUFLAGS  := -cdrom os.iso -serial stdio -no-reboot -no-shutdown -m 512M -display gtk
 
 CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -ffreestanding -fno-stack-protector \
           -fno-pic -fno-pie -fno-lto -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
-          -mcmodel=kernel -m64
+          -mcmodel=kernel -m64 -Ikernel/include -MMD -MP
+CFLAGS += $(EXTRA)
 LDFLAGS := -nostdlib -static -z max-page-size=0x1000 -T linker.ld
 
 SRCS := $(shell find kernel -name '*.c')
 OBJS := $(SRCS:%.c=build/%.o)
+-include $(OBJS:.o=.d)
 
 .PHONY: all iso run debug trace clean
 all: kernel.elf
@@ -31,10 +33,10 @@ kernel.elf: $(OBJS) linker.ld
 	$(LD) $(LDFLAGS) $(OBJS) -o $@
 
 iso: os.iso
-os.iso: kernel.elf limine.conf
+os.iso: kernel.elf limine.conf assets/splash.png
 	rm -rf iso_root && mkdir -p iso_root/boot/limine iso_root/EFI/BOOT
 	cp kernel.elf iso_root/boot/kernel.elf
-	cp limine.conf iso_root/boot/limine/limine.conf
+	cp limine.conf assets/splash.png iso_root/boot/limine/
 	cp $(LIMINE_DIR)/limine-bios.sys $(LIMINE_DIR)/limine-bios-cd.bin \
 	   $(LIMINE_DIR)/limine-uefi-cd.bin iso_root/boot/limine/
 	cp $(LIMINE_DIR)/BOOTX64.EFI iso_root/EFI/BOOT/
