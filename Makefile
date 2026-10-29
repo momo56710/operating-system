@@ -28,7 +28,7 @@ OBJS    := $(SRCS:%.c=build/%.o) $(ASMSRCS:%.asm=build/%.asm.o)
 -include $(OBJS:.o=.d)
 
 # ---- user programs: separate ELF files, no SSE (the kernel does not save FPU/SSE state yet) ----
-USER_PROGS := sh ls cat echo cp rm mkdir touch wc grep head ps mem sleep uptime \
+USER_PROGS := sh nano mv ls cat echo cp rm mkdir touch wc grep head ps mem sleep uptime \
               hello args crash forktest umem count primes fib sortdemo tree life mandel bench
 USER_CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -ffreestanding -fno-stack-protector -fno-pic -fno-pie \
                -mno-sse -mno-sse2 -mno-mmx -mno-red-zone -m64 -Iuser/include -Iabi -MMD -MP

@@ -11,7 +11,7 @@ static const char normal[58] __attribute__((nonstring)) =
 static const char shifted[58] __attribute__((nonstring)) =
     "\0\0" "!@#$%^&*()_+" "\b\t" "QWERTYUIOP{}" "\n\0" "ASDFGHJKL:\"~" "\0|" "ZXCVBNM<>?" "\0*\0 ";
 
-static int shift, caps, ctrl;
+static int shift, caps, ctrl, extended;
 
 /* Typed characters wait here until a task reads them with kbd_getc(). */
 #define QSIZE 128
@@ -36,10 +36,34 @@ char kbd_getc(void) {
     return c;
 }
 
+/* Arrow keys, Home, End, Delete and so on arrive after a 0xE0 prefix. Programs see them as the
+ * usual ANSI sequences, e.g. Up = ESC [ A, Delete = ESC [ 3 ~. */
+static void push_seq(const char *s) { while (*s) kbd_push(*s++); }
+
+static void extended_key(uint8_t sc, int release) {
+    if (sc == 0x1D) { ctrl = !release; return; }                   /* right Ctrl */
+    if (release) return;
+    switch (sc) {
+    case 0x48: push_seq("\x1b[A"); break;
+    case 0x50: push_seq("\x1b[B"); break;
+    case 0x4D: push_seq("\x1b[C"); break;
+    case 0x4B: push_seq("\x1b[D"); break;
+    case 0x47: push_seq("\x1b[H"); break;
+    case 0x4F: push_seq("\x1b[F"); break;
+    case 0x53: push_seq("\x1b[3~"); break;
+    case 0x52: push_seq("\x1b[2~"); break;
+    case 0x49: push_seq("\x1b[5~"); break;
+    case 0x51: push_seq("\x1b[6~"); break;
+    case 0x1C: kbd_push('\n'); break;                             /* keypad Enter */
+    }
+}
+
 static void keyboard_irq(void) {
     uint8_t sc = inb(0x60);
+    if (sc == 0xE0) { extended = 1; return; }
     int release = sc & 0x80;
     sc &= 0x7F;
+    if (extended) { extended = 0; extended_key(sc, release); return; }
 
     if (sc == 0x2A || sc == 0x36) { shift = !release; return; }
     if (sc == 0x1D) { ctrl = !release; return; }

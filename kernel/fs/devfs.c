@@ -1,5 +1,6 @@
 #include "vfs.h"
 #include "keyboard.h"
+#include "fb.h"
 #include "kprintf.h"
 #include "heap.h"
 #include "string.h"
@@ -15,13 +16,21 @@ static const struct vfs_ops dev_ops, devdir_ops;
 
 static char line[256];
 static unsigned line_len, line_pos;
+static int raw_mode;      /* programs like editors get each key immediately, with no echo */
+
+void console_set_cooked(void) { raw_mode = 0; }
 
 static int64_t console_read(uint64_t n, void *dst) {
     if (!n) return 0;
+    if (raw_mode) { *(char *)dst = kbd_getc(); return 1; }      /* one key per read, escape sequences included */
     if (line_pos == line_len) {                         /* need a fresh line */
         line_len = line_pos = 0;
         for (;;) {
             char c = kbd_getc();
+            if (c == 0x1b) {                            /* an arrow or function key: line mode ignores it */
+                if (kbd_getc() == '[') { char f; do f = kbd_getc(); while (!(f >= '@' && f <= '~')); }
+                continue;
+            }
             if (c == 4) {                               /* Ctrl-D */
                 if (!line_len) return 0;                /* on an empty line it means end of input */
                 break;
@@ -37,18 +46,10 @@ static int64_t console_read(uint64_t n, void *dst) {
     return (int64_t)got;
 }
 
-/* "ESC [ 2 J" clears the screen; everything else is shown as is. */
+/* Everything is passed on as is: the framebuffer console understands the ANSI escape sequences
+ * (cursor movement, clearing, reverse video) and a serial terminal does too. */
 static int64_t console_write(const char *buf, uint64_t n) {
-    uint64_t start = 0;
-    for (uint64_t i = 0; i + 4 <= n; i++) {
-        if (buf[i] == 0x1b && buf[i + 1] == '[' && buf[i + 2] == '2' && buf[i + 3] == 'J') {
-            kwrite(buf + start, i - start);
-            kclear();
-            i += 3;
-            start = i + 1;
-        }
-    }
-    kwrite(buf + start, n - start);
+    kwrite(buf, n);
     return (int64_t)n;
 }
 
@@ -67,7 +68,18 @@ static int64_t dev_write(struct vnode *v, uint64_t off, const void *buf, uint64_
     return (int64_t)n;                                  /* null and zero swallow everything */
 }
 
-static const struct vfs_ops dev_ops = { .read = dev_read, .write = dev_write };
+static int64_t dev_ioctl(struct vnode *v, uint64_t req, uint64_t arg) {
+    if ((long)v->priv != DEV_CONSOLE) return -1;
+    if (req == TTY_RAW) { raw_mode = arg != 0; return 0; }
+    if (req == TTY_SIZE) {
+        uint32_t c, r;
+        fb_get_size(&c, &r);
+        return ((int64_t)r << 16) | c;
+    }
+    return -1;
+}
+
+static const struct vfs_ops dev_ops = { .read = dev_read, .write = dev_write, .ioctl = dev_ioctl };
 
 /* ---- the directory ---- */
 

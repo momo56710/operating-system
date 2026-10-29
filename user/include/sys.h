@@ -37,3 +37,4 @@ int  getcwd(char *buf, size_t size);
 int  mkdir(const char *path);
 int  unlink(const char *path);
 int  sysinfo(int what, unsigned long index, void *buf);
+long ioctl(int fd, int request, long arg);

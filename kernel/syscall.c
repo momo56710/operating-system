@@ -249,6 +249,7 @@ int64_t syscall_dispatch(struct interrupt_frame *f) {
     case SYS_MKDIR:   r = sys_mkdir(a0); break;
     case SYS_UNLINK:  r = sys_unlink(a0); break;
     case SYS_SYSINFO: r = sys_sysinfo(a0, a1, a2); break;
+    case SYS_IOCTL:   { struct file *fl = fd_file(a0); r = fl ? file_ioctl(fl, a1, a2) : -1; break; }
     case SYS_EXIT:    process_exit((int)a0);
     case SYS_GETPID:  r = (int64_t)current_task()->pid; break;
     case SYS_YIELD:   yield(); r = 0; break;

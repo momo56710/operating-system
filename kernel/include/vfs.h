@@ -16,6 +16,7 @@ struct vfs_ops {
     uint64_t (*getsize)(struct vnode *v);                                            /* optional; else vnode->size */
     void    (*release)(struct vnode *v);                                             /* last reference dropped */
     void    (*close)(struct vnode *v, int flags);                                    /* one open file on it closed */
+    int64_t (*ioctl)(struct vnode *v, uint64_t req, uint64_t arg);                   /* device control; -1 if unsupported */
 };
 
 struct vnode {
@@ -65,3 +66,5 @@ void          tar_mount(struct vnode *root, const void *tar, uint64_t size);
 struct vnode *devfs_new(void);
 struct vnode *fat32_mount(void);       /* the volume on the virtio disk, or 0 */
 int           pipe_create(struct file **rd, struct file **wr);
+int64_t       file_ioctl(struct file *f, uint64_t req, uint64_t arg);
+void          console_set_cooked(void);   /* leave raw mode (called when a process exits) */

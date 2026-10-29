@@ -148,6 +148,7 @@ void process_exit(int code) {
     struct task *t = current_task();
     for (int i = 0; i < FD_MAX; i++)             /* closing the last write end of a pipe is what lets its reader see end of file */
         if (t->fds[i]) { file_close(t->fds[i]); t->fds[i] = 0; }
+    console_set_cooked();                        /* a program that dies in raw mode must not leave the console that way */
     irq_save();
     uint64_t pml4 = t->pml4;
     task_use_kernel_space();          /* never free the page tables the CPU is using */

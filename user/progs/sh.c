@@ -90,6 +90,87 @@ static void exec_program(char **argv) {
     exit(127);
 }
 
+/* ---- aliases: your own names for commands ---- */
+
+#define MAX_ALIASES 32
+static struct alias { char name[32]; char value[128]; } aliases[MAX_ALIASES];
+static int nalias;
+
+static struct alias *find_alias(const char *name, size_t len) {
+    for (int i = 0; i < nalias; i++)
+        if (strlen(aliases[i].name) == len && !strncmp(aliases[i].name, name, len)) return &aliases[i];
+    return 0;
+}
+
+static void set_alias(const char *name, const char *value) {
+    struct alias *a = find_alias(name, strlen(name));
+    if (!a) {
+        if (nalias == MAX_ALIASES) { dprintf(2, "alias: too many aliases\n"); return; }
+        a = &aliases[nalias++];
+    }
+    strncpy(a->name, name, sizeof a->name - 1);
+    strncpy(a->value, value, sizeof a->value - 1);
+}
+
+/* Replace the first word of every command on the line (the start, and after each '|') by its alias.
+ * Done once, as text, so an alias may contain pipes and options, and `alias ls='ls -l'` works. */
+static int expand_aliases(const char *in, char *out, size_t max) {
+    size_t o = 0;
+    int at_start = 1;
+    char quote = 0;
+    for (const char *p = in; *p; ) {
+        if (at_start) {
+            while (*p == ' ' || *p == '\t') { if (o + 1 >= max) return -1; out[o++] = *p++; }
+            const char *start = p;
+            while (*p && !strchr(" \t\n|<>\"'", *p)) p++;
+            size_t len = (size_t)(p - start);
+            struct alias *a = len ? find_alias(start, len) : 0;
+            const char *text = a ? a->value : start;
+            size_t tl = a ? strlen(a->value) : len;
+            if (o + tl + 1 >= max) return -1;
+            memcpy(out + o, text, tl);
+            o += tl;
+            at_start = 0;
+            continue;
+        }
+        char c = *p++;
+        if (quote) { if (c == quote) quote = 0; }
+        else if (c == '"' || c == '\'') quote = c;
+        else if (c == '|') at_start = 1;
+        if (o + 1 >= max) return -1;
+        out[o++] = c;
+    }
+    out[o] = 0;
+    return 0;
+}
+
+static void execute_line(const char *line);
+
+/* Run every line of a file in this shell: blank lines and lines starting with # are skipped. */
+static int run_script(const char *path) {
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return -1;
+    char line[256];
+    long n;
+    while ((n = read_line(fd, line, sizeof line)) > 0) {
+        while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
+        const char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p && *p != '#') execute_line(p);
+    }
+    close(fd);
+    return 0;
+}
+
+static int find_program(const char *name, char *path, size_t max) {
+    struct stat st;
+    for (int i = 0; search_dirs[i]; i++) {
+        snprintf(path, max, "%s/%s", search_dirs[i], name);
+        if (stat(path, &st) == 0 && st.type == FT_FILE) return 1;
+    }
+    return 0;
+}
+
 static int builtin(struct cmd *c) {
     char **a = c->argv;
     if (!strcmp(a[0], "cd")) {
@@ -100,12 +181,56 @@ static int builtin(struct cmd *c) {
     if (!strcmp(a[0], "pwd")) { char b[128]; if (getcwd(b, sizeof b) == 0) printf("%s\n", b); return 1; }
     if (!strcmp(a[0], "exit")) exit(c->argc > 1 ? atoi(a[1]) : 0);
     if (!strcmp(a[0], "clear")) { write(1, "\x1b[2J", 4); return 1; }
+    if (!strcmp(a[0], "alias")) {
+        if (c->argc == 1)
+            for (int i = 0; i < nalias; i++) printf("alias %s='%s'\n", aliases[i].name, aliases[i].value);
+        for (int i = 1; i < c->argc; i++) {
+            char *eq = strchr(a[i], '=');
+            if (eq) { *eq = 0; set_alias(a[i], eq + 1); }
+            else {
+                struct alias *al = find_alias(a[i], strlen(a[i]));
+                if (al) printf("alias %s='%s'\n", al->name, al->value); else dprintf(2, "alias: %s: not found\n", a[i]);
+            }
+        }
+        return 1;
+    }
+    if (!strcmp(a[0], "unalias")) {
+        for (int i = 1; i < c->argc; i++) {
+            if (!strcmp(a[i], "-a")) { nalias = 0; continue; }
+            struct alias *al = find_alias(a[i], strlen(a[i]));
+            if (!al) { dprintf(2, "unalias: %s: not found\n", a[i]); continue; }
+            *al = aliases[--nalias];
+        }
+        return 1;
+    }
+    if (!strcmp(a[0], "which")) {
+        for (int i = 1; i < c->argc; i++) {
+            char path[256];
+            struct alias *al = find_alias(a[i], strlen(a[i]));
+            if (al) printf("%s: alias for '%s'\n", a[i], al->value);
+            else if (!strcmp(a[i], "cd") || !strcmp(a[i], "pwd") || !strcmp(a[i], "exit") || !strcmp(a[i], "clear") ||
+                     !strcmp(a[i], "alias") || !strcmp(a[i], "unalias") || !strcmp(a[i], "source") || !strcmp(a[i], "which") ||
+                     !strcmp(a[i], "help")) printf("%s: shell built-in\n", a[i]);
+            else if (find_program(a[i], path, sizeof path)) printf("%s\n", path);
+            else printf("%s: not found\n", a[i]);
+        }
+        return 1;
+    }
+    if (!strcmp(a[0], "source") || !strcmp(a[0], ".")) {
+        if (c->argc != 2) { dprintf(2, "usage: source file\n"); return 1; }
+        char path[256];
+        strncpy(path, a[1], sizeof path - 1);                  /* parsing the script reuses the word buffer */
+        path[sizeof path - 1] = 0;
+        if (run_script(path) < 0) dprintf(2, "source: cannot open %s\n", path);
+        return 1;
+    }
     if (!strcmp(a[0], "help")) {
-        printf("Built-ins: cd pwd exit clear help\n");
-        printf("Programs:  ls cat echo cp rm mkdir touch wc grep head ps mem sleep uptime\n");
+        printf("Built-ins: cd pwd exit clear help alias unalias which source\n");
+        printf("Programs:  ls cat echo cp mv rm mkdir touch wc grep head ps mem sleep uptime nano\n");
         printf("           hello args count primes fib sortdemo tree life mandel bench forktest umem crash\n");
         printf("Pipes:     ls / | grep bin        Redirect: echo hi > /tmp/a.txt, cat < file, echo more >> file\n");
-        printf("Input:     cat > /tmp/notes.txt   then type lines and press Ctrl-D\n");
+        printf("Editor:    nano /disk/notes.txt   (Ctrl-O saves, Ctrl-X exits, Ctrl-G shows all keys)\n");
+        printf("Names:     alias ll='ls -l'   then type ll.  Put aliases in /disk/shrc to keep them.\n");
         printf("Disk:      /disk is a FAT32 volume that survives reboots: ls /disk, cat /disk/hello.txt, greet\n");
         printf("Places:    /bin programs (ramdisk)  /tmp scratch (memory)  /dev console null zero  /disk disk\n");
         return 1;
@@ -149,18 +274,26 @@ static void run_pipeline(struct cmd *cmds, int n) {
     }
 }
 
+static void execute_line(const char *line) {
+    char expanded[512];
+    struct cmd cmds[MAX_CMDS];
+    if (expand_aliases(line, expanded, sizeof expanded) < 0) { dprintf(2, "sh: line too long after expanding aliases\n"); return; }
+    int count = parse(expanded, cmds);
+    if (count <= 0) return;
+    if (count == 1 && !cmds[0].in && !cmds[0].out && builtin(&cmds[0])) return;
+    run_pipeline(cmds, count);
+}
+
 int main(void) {
     char line[256];
-    struct cmd cmds[MAX_CMDS];
+    run_script("/etc/shrc");                       /* system defaults on the ramdisk */
+    run_script("/disk/shrc");                      /* your own, kept on the disk */
     for (;;) {
         char cwd[128];
         if (getcwd(cwd, sizeof cwd) < 0) strcpy(cwd, "?");
         printf("LeOS:%s$ ", cwd);
         long n = read_line(0, line, sizeof line);
         if (n == 0) { printf("exit\n"); return 0; }          /* Ctrl-D */
-        int count = parse(line, cmds);
-        if (count <= 0) continue;
-        if (count == 1 && !cmds[0].in && !cmds[0].out && builtin(&cmds[0])) continue;
-        run_pipeline(cmds, count);
+        execute_line(line);
     }
 }

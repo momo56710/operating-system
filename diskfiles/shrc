@@ -1,0 +1,10 @@
+# Your own shell commands and aliases. This file is read every time the shell starts.
+# Edit it with:  nano /disk/shrc      Apply changes now with:  source /disk/shrc
+#
+# alias NAME='what it should run'
+#
+# Examples (remove the # to turn one on):
+# alias ls='ls -l'
+# alias notes='nano /disk/notes/todo.txt'
+# alias hi='echo hello from my own command'
+# alias bins='ls /bin | grep'

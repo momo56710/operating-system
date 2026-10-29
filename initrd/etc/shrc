@@ -1,0 +1,11 @@
+# LeOS shell startup file (read-only copy on the ramdisk).
+# These aliases are the system defaults. Put your own in /disk/shrc, which survives reboots;
+# a name defined there replaces one defined here.
+alias ll='ls -l'
+alias dir='ls -l'
+alias cls='clear'
+alias type='cat'
+alias md='mkdir'
+alias del='rm'
+alias copy='cp'
+alias move='mv'

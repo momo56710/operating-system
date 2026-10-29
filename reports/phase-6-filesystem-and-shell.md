@@ -65,3 +65,42 @@ All by typing into the shell under QEMU and reading the serial log.
     greet            # run it again after a reboot: the count goes up
     echo hi > /disk/mine.txt
     ls /bin | grep s | wc
+
+## Addendum: the nano editor and naming your own commands (2026-10-29)
+
+### nano (`user/progs/nano.c`)
+GNU nano itself needs ncurses, terminfo and a full C library, so I wrote a nano-style editor for LeOS. Same keys and layout: an inverse-video title bar with `[Modified]`, the text, a centred message line, and two rows of shortcuts.
+
+| Keys | Action |
+|---|---|
+| Arrows, Home, End, PgUp, PgDn | move (Ctrl-A / Ctrl-E: start / end of line) |
+| Backspace, Delete, Enter, Tab | edit |
+| Ctrl-K / Ctrl-U | cut a line (repeat to cut several) / paste |
+| Ctrl-W | search (Enter alone repeats the last search; wraps around) |
+| Ctrl-O | write out (prompt is prefilled with the file name) |
+| Ctrl-X | exit; asks Y / N / Ctrl-C if there are unsaved changes |
+| Ctrl-G, Ctrl-C, Ctrl-L | help screen, show position, redraw |
+
+What this needed in the kernel:
+- **Keyboard:** the 0xE0-prefixed keys (arrows, Home, End, Delete, PgUp, PgDn, Insert, keypad Enter, right Ctrl) now arrive as the usual ANSI sequences (Up = `ESC [ A`, Delete = `ESC [ 3 ~`).
+- **Raw console mode:** new system call `ioctl(fd, request, arg)` with `TTY_RAW` (every key delivered at once, no echo or line editing) and `TTY_SIZE` (rows and columns). The console leaves raw mode automatically when any process exits, so a crashed editor cannot leave the shell unusable. In normal line mode arrow-key sequences are now ignored instead of landing in the typed text.
+- **Framebuffer console rewritten:** it keeps a shadow copy of the screen, so the cursor no longer erases the character under it, and it understands ANSI escapes: cursor positioning (`ESC[r;cH`, `A B C D`), clear screen / line (`J`, `K`), reverse video (`7m`, `0m`), and cursor hide/show. Writing in the last column now waits to wrap until another character arrives, like a real terminal, so a full-screen program cannot scroll the screen by accident. The serial port gets the same bytes, so a real terminal on the serial line works too.
+- **Library:** `realloc`, `snprintf`, `strdup`, `ioctl`.
+
+### Naming commands your way
+- Shell built-ins `alias`, `unalias`, `which` and `source` (`.` also works). An alias replaces the first word of every command (at the start of a line and after each `|`), once, as text. So aliases can contain options and pipes, and `alias ls='ls -l'` works.
+- The shell runs `/etc/shrc` (ramdisk defaults: `ll dir cls type md del copy move`) and then `/disk/shrc` (your own, persists) at startup. Blank lines and `#` comments are allowed. `source /disk/shrc` applies changes without restarting.
+- `mv` (files only; copies then removes, so it also moves between filesystems; moves into a directory if the destination is one).
+- `diskfiles/shrc` is a commented template that lands on a freshly built disk. An existing disk gets one by running `nano /disk/shrc`.
+
+### Verified
+All by typing real keystrokes into QEMU and screenshotting or reading the serial log:
+- nano: title bar, text, shortcut bars and prompts render correctly (screenshots). Typing, Enter, arrows, End, Home, Delete, cut (Ctrl-K), paste (Ctrl-U), search (Ctrl-W), write out (Ctrl-O, prefilled name), exit (Ctrl-X). The saved file reads back as expected. Answering N to the exit prompt discards changes (file unchanged). A file saved under `/disk` was there afterwards. `ps` showed no leftover processes.
+- Aliases: the default ones work (`ll`, `cls`, `type`); `alias hi='echo hello there'` then `hi Momo`; an alias containing a pipe (`bins sh`); `alias ls='ls -l'`; `which` (alias, built-in, program path, not found); `unalias`. After a reboot on the same disk, aliases written to `/disk/shrc` were defined at startup.
+- `mv` renamed a file within `/tmp` and moved it onto `/disk`.
+- Regressions after the framebuffer rewrite: scrolling, clear screen, the file and pipe commands, process crashes, `tree`, `umem`, the 100 MiB memory test, and a kernel page-fault dump all still work.
+
+### Limits
+- nano: no undo, no replace, no line numbers, no "read file into buffer", no mouse, no syntax colours. Long lines scroll sideways instead of wrapping. Text is ASCII only; tabs show 4 columns wide. The Esc key by itself is not used. Up to 200,000 lines.
+- Aliases take no arguments in the middle (`alias x='echo $1'` is not supported; there are no variables) and are not expanded inside other aliases.
+- Tested with simulated keystrokes through QEMU, not a physical keyboard.

@@ -37,3 +37,10 @@ void *memmove(void *d, const void *s, size_t n) {
     else { a += n; b += n; while (n--) *--a = *--b; }
     return d;
 }
+
+char *strdup(const char *s) {
+    size_t n = strlen(s) + 1;
+    char *d = malloc(n);
+    if (d) memcpy(d, s, n);
+    return d;
+}

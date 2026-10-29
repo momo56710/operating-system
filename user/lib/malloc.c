@@ -35,3 +35,15 @@ void free(void *p) {
     b->next = free_list;
     free_list = b;
 }
+
+void *realloc(void *p, size_t n) {
+    if (!p) return malloc(n);
+    if (!n) { free(p); return 0; }
+    struct hdr *b = (struct hdr *)p - 1;
+    if (b->size >= n) return p;                      /* the block is already big enough */
+    void *q = malloc(n);
+    if (!q) return 0;
+    memcpy(q, p, b->size);
+    free(p);
+    return q;
+}

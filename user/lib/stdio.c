@@ -58,6 +58,16 @@ int printf(const char *fmt, ...) {
     return n;
 }
 
+int snprintf(char *buf, size_t size, const char *fmt, ...) {
+    if (!size) return 0;
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vformat(buf, size - 1, fmt, ap);
+    va_end(ap);
+    buf[n < (int)size - 1 ? n : (int)size - 1] = 0;
+    return n;
+}
+
 int dprintf(int fd, const char *fmt, ...) {
     char buf[512];
     va_list ap;

@@ -34,3 +34,4 @@ int  getcwd(char *buf, size_t size) { return (int)syscall3(SYS_GETCWD, (long)buf
 int  mkdir(const char *path) { return (int)syscall3(SYS_MKDIR, (long)path, 0, 0); }
 int  unlink(const char *path) { return (int)syscall3(SYS_UNLINK, (long)path, 0, 0); }
 int  sysinfo(int what, unsigned long index, void *buf) { return (int)syscall3(SYS_SYSINFO, what, (long)index, (long)buf); }
+long ioctl(int fd, int request, long arg) { return syscall3(SYS_IOCTL, fd, request, arg); }

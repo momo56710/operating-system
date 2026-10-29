@@ -28,6 +28,11 @@
 #define SYS_MKDIR   23
 #define SYS_UNLINK  24
 #define SYS_SYSINFO 25  /* sysinfo(what, index, buf) */
+#define SYS_IOCTL   26  /* ioctl(fd, request, arg): terminal control on the console */
+
+/* ioctl requests */
+#define TTY_RAW  1      /* arg 1: deliver every key as it is typed, no echo or line editing; 0: normal line mode */
+#define TTY_SIZE 2      /* returns (rows << 16) | columns */
 
 #define O_RDONLY 0
 #define O_WRONLY 1

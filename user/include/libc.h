@@ -23,7 +23,11 @@ int  dprintf(int fd, const char *fmt, ...) __attribute__((format(printf, 2, 3)))
 int  puts(const char *s);
 int  putchar(int c);
 
+int  snprintf(char *buf, size_t size, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+char *strdup(const char *s);
+
 void *malloc(size_t n);
+void *realloc(void *p, size_t n);
 void  free(void *p);
 
 /* Write all of buf, even if the kernel takes it in pieces. */

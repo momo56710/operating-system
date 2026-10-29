@@ -248,3 +248,7 @@ int file_readdir(struct file *f, uint64_t index, struct dirent *out) {
     if (f->vn->type != FT_DIR || !f->vn->ops->readdir) return -1;
     return f->vn->ops->readdir(f->vn, index, out);
 }
+
+int64_t file_ioctl(struct file *f, uint64_t req, uint64_t arg) {
+    return f->vn->ops->ioctl ? f->vn->ops->ioctl(f->vn, req, arg) : -1;
+}
