@@ -897,6 +897,7 @@ app_defs.settings = {
 -- ---------------------------------------------------------------- windows
 
 local capture
+local power_dlg = false
 local TITLE_H = 34
 local MAIN_APPS = { "about", "skills", "experience", "projects", "contact", "terminal", "files", "notes", "settings", "monitor" }
 
@@ -968,12 +969,21 @@ local function draw_taskbar()
     region(x - 4, 14, w + 8, 32, function() open_app(name) end, "nav" .. name)
     x = x + w + 24
   end
+  -- far right: power button, then the clock, then "exit" (leave the desktop, back to the text shell)
+  local pbx = W - 28 - 30
+  local hot = hoverkey == "power"
+  gfx.frame(pbx, 15, 30, 30, hot and C.fg or C.mute, 9)
+  circle(pbx + 15, 31, 8, hot and accent() or C.dim, false)
+  gfx.rect(pbx + 11, 21, 9, 8, C.bg)                       -- the gap in the ring
+  gfx.rect(pbx + 15, 21, 1, 11, hot and accent() or C.dim)
+  region(pbx, 15, 30, 30, function() power_dlg = true end, "power")
   local cl = clock_str()
-  text(W - 28 - tw(cl), 21, cl, C.fg)
-  local ex = W - 28 - tw(cl) - 28 - 40
-  gfx.frame(ex, 17, 40, 26, hoverkey == "exit" and C.fg or C.mute, 8)
-  text(ex + 8, 21, "off", hoverkey == "exit" and C.fg or C.dim)
-  region(ex, 17, 40, 26, function() running = false end, "exit")
+  local cx = pbx - 16 - tw(cl)
+  text(cx, 21, cl, C.fg)
+  local ex = cx - 16 - 48
+  gfx.frame(ex, 17, 48, 26, hoverkey == "exit" and C.fg or C.mute, 8)
+  text(ex + 8, 21, "exit", hoverkey == "exit" and C.fg or C.dim)
+  region(ex, 17, 48, 26, function() running = false end, "exit")
 end
 
 local function draw_hero()
@@ -1147,6 +1157,48 @@ local function draw_window(win, focused)
   regions[#regions + 1] = { x = x + w - 18, y = y + h - 18, w = 16, h = 16, key = "grip", win = win }
 end
 
+-- ---- power: a confirmation, then every program is stopped, the screen says goodbye and the machine powers off
+
+local function power_action(kind)
+  for i = #wins, 1, -1 do close_win(wins[i]) end                  -- stop everything that is still running
+  save_cfg()
+  gfx.rect(0, 0, W, H, C.bg)
+  local msg = kind == "off" and "Shutting down..." or "Restarting..."
+  local sub = kind == "off" and "It is safe to turn the power off when the screen goes dark." or "See you in a moment."
+  gfx.frame(W // 2 - 280, H // 2 - 50, 560, 100, C.line, 14)
+  text(W // 2 - tw(msg, 2) // 2, H // 2 - 34, msg, C.fg, 2)
+  text(W // 2 - tw(sub) // 2, H // 2 + 14, sub, C.dim)
+  gfx.present()
+  leos.sleep(900)
+  if kind == "off" then leos.poweroff() else leos.reboot() end
+  toast("the machine did not respond to the power request")        -- only reached if the firmware refused
+end
+
+local function draw_power()
+  if not power_dlg then return end
+  local w, h = 460, 190
+  local x, y = (W - w) // 2, (H - h) // 2
+  gfx.round(x - 8, y - 8, w + 16, h + 16, 16, C.bg)               -- hide what is behind
+  gfx.frame(x, y, w, h, C.fg, 14)
+  text(x + 24, y + 20, "Power", C.fg, 2)
+  text(x + 24, y + 64, "Stop everything and switch the machine off?", C.dim)
+  local items = { { "shut down", "off", "s" }, { "restart", "restart", "r" }, { "cancel", nil, "esc" } }
+  local bx = x + 24
+  for i, it in ipairs(items) do
+    local bw = 128
+    local key = "pw" .. i
+    local hot = hoverkey == key
+    gfx.frame(bx, y + 110, bw, 44, hot and C.fg or (i == 1 and accent() or C.line), 12)
+    if hot then gfx.round(bx + 2, y + 112, bw - 4, 40, 10, C.faint) end
+    text(bx + bw // 2 - tw(it[1]) // 2, y + 110 + 8, it[1], hot and C.fg or C.fg)
+    text(bx + bw // 2 - tw("(" .. it[3] .. ")") // 2, y + 110 + 26, "(" .. it[3] .. ")", C.mute)
+    region(bx, y + 110, bw, 44, function()
+      if it[2] then power_action(it[2]) else power_dlg = false end
+    end, key)
+    bx = bx + bw + 16
+  end
+end
+
 local function draw_toast()
   if not toast_msg or now() > toast_until then toast_msg = nil return end
   local w = tw(toast_msg) + 40
@@ -1166,6 +1218,7 @@ local function redraw()
   draw_bottom()
   local focused = top_win()
   for _, win in ipairs(wins) do if not win.min then draw_window(win, win == focused) end end
+  draw_power()
   draw_toast()
 end
 
@@ -1182,6 +1235,19 @@ local function on_mouse(ev)
   local was_down = down
   mx, my = ev.x, ev.y
   down = (ev.buttons & 1) ~= 0
+  if power_dlg then                                   -- the power dialog is modal: only its buttons react
+    local r = find_region(mx, my)
+    local k = r and r.key:match("^pw%d$") and r.key or nil
+    if down and not was_down then
+      if r and k and r.fn then r.fn() elseif not r or not k then
+        local w, h = 460, 190
+        if mx < (W - w) // 2 or mx > (W + w) // 2 or my < (H - h) // 2 or my > (H + h) // 2 then power_dlg = false end   -- click outside cancels
+      end
+      return true
+    end
+    if k ~= hoverkey then hoverkey = k; return true end
+    return false
+  end
 
   if ev.wheel ~= 0 then
     local win
@@ -1258,6 +1324,14 @@ local function on_mouse(ev)
 end
 
 local function on_key(ev)
+  if power_dlg then
+    if ev.down then
+      if ev.code == 0x01 or ev.ch == "c" then power_dlg = false
+      elseif ev.ch == "s" or ev.code == 0x1C then power_action("off")
+      elseif ev.ch == "r" then power_action("restart") end
+    end
+    return true
+  end
   if ev.down and (ev.mods & 6) == 6 and ev.ch == "q" then running = false return true end
   if ev.down and (ev.mods & 4) ~= 0 and ev.code == 0x0F then                         -- alt+tab: next window
     local list = {}

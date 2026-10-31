@@ -2,7 +2,8 @@ LeOS desktop: running and writing Lua
 =====================================
 
 Start it:   desktop                 (or:  desktop open=snake open=terminal)
-Leave it:   the "off" button, or Ctrl+Alt+Q
+Leave it:   the "exit" button or Ctrl+Alt+Q (back to the text shell); the power button (top right,
+            or the shell commands poweroff / reboot) switches the machine off or restarts it
 
 SCRIPT ICONS
   Every *.lua file in /home/lua and /disk/lua is an icon on the desktop. Click one to run it: it opens a

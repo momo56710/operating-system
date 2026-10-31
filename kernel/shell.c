@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "power.h"
 #include "keyboard.h"
 #include "kprintf.h"
 #include "task.h"
@@ -60,8 +61,7 @@ static void cmd_ps(int argc, char **argv) { (void)argc; (void)argv; task_print_a
 static void cmd_reboot(int argc, char **argv) {
     (void)argc; (void)argv;
     kprintf("rebooting...\n");
-    outb(0x64, 0xFE);                    /* pulse the CPU reset line through the keyboard controller */
-    for (;;) __asm__ volatile ("hlt");
+    power_reboot();
 }
 
 struct command { const char *name, *help; void (*fn)(int, char **); };

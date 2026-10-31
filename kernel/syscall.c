@@ -11,6 +11,7 @@
 #include "cpu.h"
 #include "fb.h"
 #include "input.h"
+#include "power.h"
 
 /* ---- checked access to user memory ---- */
 
@@ -390,6 +391,7 @@ int64_t syscall_dispatch(struct interrupt_frame *f) {
     case SYS_UPTIME:  r = (int64_t)uptime_ms(); break;
     case SYS_TIME:    r = (int64_t)wall_time(); break;
     case SYS_GFX:     r = sys_gfx(a0, a1); break;
+    case SYS_POWER:   if (a0 == POWER_OFF) power_off(); if (a0 == POWER_REBOOT) power_reboot(); r = -1; break;
     case SYS_KILL:    r = task_kill_child(current_task(), a0); break;
     case SYS_WAIT: {
         int status = 0;

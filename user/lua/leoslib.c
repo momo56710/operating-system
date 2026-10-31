@@ -11,6 +11,7 @@
  *   leos.ping(host [, timeout_ms])       -> milliseconds, or nil
  *   leos.dir(path)  leos.stat(path)  leos.getcwd()  leos.chdir(path)  leos.mkdir(path)
  *   leos.sleep(ms)  leos.uptime()  leos.netinfo()  leos.meminfo()  leos.ps()
+ *   leos.poweroff()  leos.reboot()                        (do not return)
  *   leos.diskinfo()  leos.getpid()  leos.remove(path)  leos.exists(path)
  *   leos.spawn(path, arg1, ...)          -> process: run a program with its input and output on pipes
  *   p:read()   p:write(s)   p:closeinput()   p:kill()   p:pid()   p:close()
@@ -277,6 +278,8 @@ static int l_diskinfo(lua_State *L) {
     return 1;
 }
 
+static int l_poweroff(lua_State *L) { (void)L; poweroff(); }
+static int l_reboot(lua_State *L) { (void)L; reboot(); }
 static int l_getpid(lua_State *L) { lua_pushinteger(L, getpid()); return 1; }
 static int l_remove(lua_State *L) { if (unlink(luaL_checkstring(L, 1)) < 0) return fail(L, "cannot remove"); lua_pushboolean(L, 1); return 1; }
 static int l_exists(lua_State *L) { struct stat st; lua_pushboolean(L, stat(luaL_checkstring(L, 1), &st) == 0); return 1; }
@@ -370,7 +373,7 @@ static const luaL_Reg funcs[] = {
     {"resolve", l_resolve}, {"tcp", l_tcp}, {"listen", l_listen}, {"udp", l_udp}, {"ping", l_ping},
     {"dir", l_dir}, {"stat", l_stat}, {"getcwd", l_getcwd}, {"chdir", l_chdir}, {"mkdir", l_mkdir},
     {"sleep", l_sleep}, {"uptime", l_uptime}, {"netinfo", l_netinfo}, {"meminfo", l_meminfo}, {"ps", l_ps},
-    {"diskinfo", l_diskinfo}, {"getpid", l_getpid}, {"remove", l_remove}, {"exists", l_exists},
+    {"diskinfo", l_diskinfo}, {"poweroff", l_poweroff}, {"reboot", l_reboot}, {"getpid", l_getpid}, {"remove", l_remove}, {"exists", l_exists},
     {"spawn", l_spawn}, {"reap", l_reap},
     {NULL, NULL}
 };

@@ -26,6 +26,8 @@ int  exec(const char *name, char *const argv[]);
 int  wait(int *status);
 int  waitpid_nohang(int *status);   /* 0 if no child has finished yet */
 int  kill(int pid);
+void poweroff(void) __attribute__((noreturn));
+void reboot(void) __attribute__((noreturn));
 unsigned long uptime_ms(void);
 
 int  open(const char *path, int flags);

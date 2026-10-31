@@ -32,7 +32,7 @@ OBJS    := $(SRCS:%.c=build/%.o) $(ASMSRCS:%.asm=build/%.asm.o)
 
 # ---- user programs: separate ELF files (the kernel saves their FPU/SSE state on every context switch) ----
 USER_PROGS := sh nano mv lua fpdemo libctest ifconfig ping nslookup wget nc echoserv cksum ls cat echo cp rm mkdir touch wc grep head ps mem sleep uptime \
-              hello args crash forktest umem count primes fib sortdemo tree life mandel bench gfxtest
+              hello args crash forktest umem count primes fib sortdemo tree life mandel bench gfxtest poweroff reboot
 USER_CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -ffreestanding -fno-stack-protector -fno-pic -fno-pie \
                -mno-red-zone -m64 -Iuser/include -Iabi -MMD -MP
 USER_LIB_SRCS := $(wildcard user/lib/*.c)

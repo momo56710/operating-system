@@ -130,3 +130,20 @@ maximise, resize, minimise; regression: forktest, pipes, Lua tour, libctest.
 
 Known limits: full-screen terminal programs (nano) need a real console, so use notes; a process blocked inside the
 kernel cannot be killed before its call returns (the desktop closes its pipes, which releases it).
+
+---
+
+# Phase 10c: power
+
+* **Real power-off.** `kernel/power.c` reads the ACPI tables: the FADT gives the PM1 control port and the DSDT, whose
+  `_S5_` object holds the "soft off" sleep type; writing `SLP_TYP | SLP_EN` to the port powers the machine off. If the
+  tables do not help, it tries the emulator ports (QEMU 0x604, Bochs 0xB004, VirtualBox 0x4004). Reboot tries the
+  keyboard-controller reset, the ACPI reset register, the PCI reset port and finally a triple fault.
+  The disk cache is write-through, so nothing is lost on shutdown.
+* **System call** `SYS_POWER(POWER_OFF | POWER_REBOOT)`, shell programs `poweroff` and `reboot`, Lua `leos.poweroff()`,
+  `leos.reboot()`; the kernel shell's `reboot` uses the same code.
+* **Desktop**: a power button at the top right (the old "off" button is now "exit" and only leaves the desktop). It opens
+  a confirmation: shut down (S / Enter), restart (R), cancel (Esc or click outside). On confirm every window and
+  script is stopped, settings are saved, a "Shutting down..." screen is shown, then the machine powers off.
+* Tested in QEMU: `poweroff` and `reboot` end the VM; the desktop dialog opens, cancels with Esc, and shutting down
+  from it ends the VM after showing the goodbye screen. (VirtualBox is handled by ACPI `_S5`; not yet tried there.)

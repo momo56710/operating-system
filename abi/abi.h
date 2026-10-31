@@ -40,6 +40,9 @@
 #define SYS_NETCTL   34 /* netctl(op, struct *) */
 #define SYS_SHUTDOWN 35 /* shutdown(fd): no more sending; reading continues */
 #define SYS_TIME     36 /* seconds since 1970-01-01 00:00:00 UTC */
+#define SYS_POWER    39 /* power(op): POWER_OFF or POWER_REBOOT; does not return */
+#define POWER_OFF    0
+#define POWER_REBOOT 1
 #define SYS_KILL     38 /* kill(pid): stop a child process */
 #define SYS_GFX      37 /* gfx(op, arg1, arg2): direct screen access and raw keyboard/mouse input */
 
