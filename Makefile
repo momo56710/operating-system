@@ -15,7 +15,7 @@ comma := ,
 #   make run QEMU_NET_FWD=,hostfwd=tcp::5555-:7777
 QEMU_NET_FWD :=
 # a disk image, if there is one, is attached as a virtio disk
-QEMUFLAGS  := -cdrom os.iso -boot order=d -serial stdio -m 512M -display gtk -netdev user,id=net0$(QEMU_NET_FWD) -device virtio-net-pci,netdev=net0 $(if $(wildcard disk.img),-drive file=disk.img$(comma)if=virtio$(comma)format=raw)
+QEMUFLAGS  := -cpu max -cdrom os.iso -boot order=d -serial stdio -m 512M -display gtk -netdev user,id=net0$(QEMU_NET_FWD) -device virtio-net-pci,netdev=net0 $(if $(wildcard disk.img),-drive file=disk.img$(comma)if=virtio$(comma)format=raw)
 # debug and trace freeze on a reset instead of rebooting, so a triple fault stays visible
 CRASHFLAGS := -no-reboot -no-shutdown
 
@@ -30,11 +30,11 @@ ASMSRCS := $(shell find arch -name '*.asm')
 OBJS    := $(SRCS:%.c=build/%.o) $(ASMSRCS:%.asm=build/%.asm.o)
 -include $(OBJS:.o=.d)
 
-# ---- user programs: separate ELF files, no SSE (the kernel does not save FPU/SSE state yet) ----
-USER_PROGS := sh nano mv ifconfig ping nslookup wget nc echoserv cksum ls cat echo cp rm mkdir touch wc grep head ps mem sleep uptime \
+# ---- user programs: separate ELF files (the kernel saves their FPU/SSE state on every context switch) ----
+USER_PROGS := sh nano mv fpdemo ifconfig ping nslookup wget nc echoserv cksum ls cat echo cp rm mkdir touch wc grep head ps mem sleep uptime \
               hello args crash forktest umem count primes fib sortdemo tree life mandel bench
 USER_CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -ffreestanding -fno-stack-protector -fno-pic -fno-pie \
-               -mno-sse -mno-sse2 -mno-mmx -mno-red-zone -m64 -Iuser/include -Iabi -MMD -MP
+               -mno-red-zone -m64 -Iuser/include -Iabi -MMD -MP
 USER_LIB_SRCS := $(wildcard user/lib/*.c)
 USER_LIB_OBJS := $(USER_LIB_SRCS:%.c=build/%.o) build/user/lib/crt0.o
 # Programs that live only on the disk image (/disk/bin), not on the ramdisk

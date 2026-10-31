@@ -161,6 +161,7 @@ void vmm_init(struct limine_memmap_response *mm,
         if (e->type == LIMINE_MEMMAP_BAD_MEMORY) continue;
         uint64_t flags = VMM_WRITE | VMM_NX;
         if (e->type == LIMINE_MEMMAP_FRAMEBUFFER) flags |= VMM_PWT;
+        if (e->type == LIMINE_MEMMAP_EXECUTABLE_AND_MODULES) flags &= ~VMM_WRITE;   /* no writable alias of the kernel's code */
         map_hhdm_range(e->base, e->base + e->length, flags);
     }
 

@@ -14,7 +14,7 @@ struct task {
     enum task_state state;
     uint64_t        wake_tick;    /* when sleeping */
     int             quantum;      /* ticks left in this time slice */
-    void           *stack;
+    int             kslot;        /* which guarded kernel stack it owns (see kstack.c); -1 for the boot task */
     uint64_t        kstack_top;   /* where the CPU starts the kernel stack on entry from ring 3 */
     struct task    *next;         /* circular list of all tasks */
     struct task    *wait_next;    /* link in a semaphore wait queue */
@@ -28,12 +28,14 @@ struct task {
     int             waiting;      /* blocked in wait() */
     struct file    *fds[FD_MAX];  /* open files; 0, 1, 2 are stdin, stdout, stderr */
     char            cwd[CWD_MAX];
+    uint8_t         fpu[512] __attribute__((aligned(16)));   /* FXSAVE area; only user tasks use it */
 };
 
 struct task_init {                /* optional extra setup for task_create_ex */
     uint64_t     pml4, brk_start, brk, mmap_next;
     struct task *parent;
     struct task *inherit;         /* copy this task's open files and working directory */
+    struct task *fpu_from;        /* start with a copy of this task's FPU/SSE registers (fork), else a clean state */
 };
 
 void         sched_init(void);    /* turns the boot context into task 0, the idle task */

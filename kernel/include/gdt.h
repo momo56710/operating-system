@@ -8,3 +8,4 @@
 
 void gdt_init(void);
 void tss_set_rsp0(uint64_t rsp0);
+int  gdt_on_df_stack(uint64_t addr);   /* is this address inside the dedicated double-fault (IST1) stack? */

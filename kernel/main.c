@@ -23,6 +23,7 @@
 #include "blk.h"
 #include "pci.h"
 #include "net.h"
+#include "cpu.h"
 
 __attribute__((used, section(".limine_requests_start")))
 static volatile uint64_t requests_start[] = LIMINE_REQUESTS_START_MARKER;
@@ -123,6 +124,17 @@ static void monitor_thread(void *arg) {
 }
 #endif
 
+#ifdef EXC_TEST
+/* A kernel thread that recurses until its stack runs into the guard page. */
+static int deep(int n) { volatile char pad[400]; pad[0] = (char)n; return deep(n + 1) + pad[0]; }
+static void overflow_thread(void *arg) { (void)arg; kprintf("overflowing a kernel stack...\n"); deep(0); }
+static void overflow_test(void) {
+    task_create("overflow", overflow_thread, 0);
+    __asm__ volatile ("sti");
+    for (;;) __asm__ volatile ("hlt");
+}
+#endif
+
 void kmain(void) {
     serial_init();
 
@@ -147,6 +159,7 @@ void kmain(void) {
     kprintf("GDT + TSS loaded\n");
     idt_init();
     kprintf("IDT loaded (256 vectors)\n");
+    fpu_init();
     pic_init();
     kprintf("Legacy PIC remapped and masked\n");
     syscall_init();
@@ -195,9 +208,12 @@ void kmain(void) {
     lapic_timer_start(1000);
     kprintf("Scheduler ready, timer at 1000 Hz\n");
 
+    cpu_harden_init();
+
 #ifdef EXC_TEST
     /* 1 divide error, 2 invalid opcode, 3 #GP, 4 null deref (#PF), 5 double fault,
-     * 6 access past the heap end, 7 write to read-only kernel code */
+     * 6 access past the heap end, 7 write to read-only kernel code,
+     * 8 kernel stack overflow, 9 write kernel code through the direct map */
     kprintf("triggering test exception %d\n", EXC_TEST);
     switch (EXC_TEST) {
     case 1: { volatile int a = 1, b = 0; kprintf("%d\n", a / b); break; }
@@ -206,6 +222,8 @@ void kmain(void) {
     case 4: kprintf("%d\n", *(volatile int *)0); break;
     case 6: kprintf("%d\n", *(volatile int *)(0xFFFFC00000000000ULL + (512ULL << 20))); break;
     case 7: { extern char __text_start[]; *(volatile char *)__text_start = 0; break; }
+    case 8: overflow_test(); break;
+    case 9: { uint64_t phys = vmm_translate((uint64_t)kmain); *(volatile char *)(hhdm_offset + phys) = 0; break; }   /* write kernel code through the direct map */
     case 5: idt_set_present(14, 0); kprintf("%d\n", *(volatile int *)0); break;
     }
 #endif

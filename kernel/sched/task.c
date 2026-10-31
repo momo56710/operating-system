@@ -7,8 +7,9 @@
 #include "vmm.h"
 #include "gdt.h"
 #include "vfs.h"
+#include "cpu.h"
+#include "kstack.h"
 
-#define STACK_SIZE    16384
 #define QUANTUM_TICKS 10          /* 10 ms time slice at 1000 Hz */
 
 extern void switch_to(uint64_t *save_rsp, uint64_t new_rsp);
@@ -29,6 +30,7 @@ void sched_init(void) {
     idle_task.pid = 0;
     idle_task.state = TASK_RUNNING;
     idle_task.next = &idle_task;
+    idle_task.kslot = -1;
     idle_task.quantum = QUANTUM_TICKS;
     loaded_pml4 = vmm_kernel_pml4();
     memcpy(idle_task.name, "idle", 5);
@@ -40,14 +42,15 @@ struct task *task_create(const char *name, void (*fn)(void *), void *arg) {
 
 struct task *task_create_ex(const char *name, void (*fn)(void *), void *arg, const struct task_init *init) {
     struct task *t = kmalloc(sizeof *t);
-    uint8_t *stack = kmalloc(STACK_SIZE);
-    if (!t || !stack) panic("task_create: out of memory");
+    uint64_t top;
+    int slot = t ? kstack_alloc(&top) : -1;
+    if (!t || slot < 0) panic("task_create: out of memory");
     memset(t, 0, sizeof *t);
     t->cwd[0] = '/';
-    memset(stack, 0, STACK_SIZE);     /* touch every page now: a stack must never fault on demand */
+    memcpy(t->fpu, fpu_default_state, sizeof t->fpu);
 
     /* Fake the frame switch_to() expects to pop, ending in a `ret` to the trampoline. */
-    uint64_t *sp = (uint64_t *)(stack + STACK_SIZE) - 7;
+    uint64_t *sp = (uint64_t *)top - 7;
     sp[0] = 0;                        /* r15 */
     sp[1] = 0;                        /* r14 */
     sp[2] = (uint64_t)arg;            /* r13: argument for fn */
@@ -57,14 +60,15 @@ struct task *task_create_ex(const char *name, void (*fn)(void *), void *arg, con
     sp[6] = (uint64_t)task_trampoline;
 
     t->rsp = (uint64_t)sp;
-    t->stack = stack;
-    t->kstack_top = (uint64_t)stack + STACK_SIZE;
+    t->kslot = slot;
+    t->kstack_top = top;
     if (init) {
         t->pml4 = init->pml4;
         t->brk_start = init->brk_start;
         t->brk = init->brk;
         t->mmap_next = init->mmap_next;
         t->parent = init->parent;
+        if (init->fpu_from) memcpy(t->fpu, init->fpu_from->fpu, sizeof t->fpu);
         if (init->inherit) {
             for (int i = 0; i < FD_MAX; i++)
                 if (init->inherit->fds[i]) t->fds[i] = file_dup(init->inherit->fds[i]);
@@ -108,6 +112,8 @@ void schedule(void) {                 /* interrupts are off */
     }
     uint64_t want = next->pml4 ? next->pml4 : vmm_kernel_pml4();
     if (want != loaded_pml4) { vmm_switch(want); loaded_pml4 = want; }
+    if (prev->pml4) fpu_save(prev->fpu);          /* user programs may use SSE; the kernel never does */
+    if (next->pml4) fpu_restore(next->fpu);
     switch_to(&prev->rsp, next->rsp);
 }
 
@@ -176,7 +182,7 @@ void reap_zombies(void) {
             if (t->state == TASK_ZOMBIE) { dead = t; prev->next = t->next; break; }
         irq_restore(flags);
         if (!dead) return;
-        kfree(dead->stack);
+        kstack_free(dead->kslot);
         kfree(dead);
     }
 }

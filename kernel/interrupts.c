@@ -3,6 +3,8 @@
 #include "apic.h"
 #include "task.h"
 #include "process.h"
+#include "gdt.h"
+#include "kstack.h"
 #include "io.h"
 #include "kprintf.h"
 #include "vmm.h"
@@ -34,8 +36,15 @@ static void exception(struct interrupt_frame *f) {
     kprintf_force_unlock();                   /* the faulting code may have held the print lock */
     kprintf("\n*** EXCEPTION %lu: %s ***\n", f->vector, exception_names[f->vector]);
 
+    int guard = kstack_guard_hit(read_cr(2));
+    if (f->vector == 8) {
+        kprintf("this handler is running on the %s stack\n",
+                gdt_on_df_stack((uint64_t)__builtin_frame_address(0)) ? "dedicated double-fault (IST1)" : "ordinary kernel");
+        if (guard >= 0) kprintf("cause: KERNEL STACK OVERFLOW: the guard page of kernel stack %d was hit (address %lx)\n", guard, read_cr(2));
+    }
     if (f->vector == 14) {
         uint64_t e = f->error;
+        if (guard >= 0) kprintf("cause: KERNEL STACK OVERFLOW: the guard page of kernel stack %d was hit\n", guard);
         kprintf("PAGE FAULT at 0x%lx (%s, %s, %s%s)\n", read_cr(2),
                 (e & 1)  ? "protection violation" : "page not present",
                 (e & 2)  ? "write" : "read",

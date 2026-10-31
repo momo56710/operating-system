@@ -8,6 +8,7 @@
 #include "pmm.h"
 #include "heap.h"
 #include "net.h"
+#include "cpu.h"
 
 /* ---- checked access to user memory ---- */
 
@@ -28,20 +29,26 @@ static int user_range_ok(uint64_t addr, size_t n, int write) {
 
 int copy_from_user(void *dst, uint64_t usrc, size_t n) {
     if (!user_range_ok(usrc, n, 0)) return -1;
+    user_access_begin();
     memcpy(dst, (const void *)usrc, n);
+    user_access_end();
     return 0;
 }
 
 int copy_to_user(uint64_t udst, const void *src, size_t n) {
     if (!user_range_ok(udst, n, 1)) return -1;
+    user_access_begin();
     memcpy((void *)udst, src, n);
+    user_access_end();
     return 0;
 }
 
 int copy_str_from_user(char *dst, uint64_t usrc, size_t max) {
     for (size_t i = 0; i < max; i++) {
         if (!user_range_ok(usrc + i, 1, 0)) return -1;
+        user_access_begin();
         dst[i] = *(const char *)(usrc + i);
+        user_access_end();
         if (!dst[i]) return 0;
     }
     return -1;                                   /* no terminator within max bytes */
@@ -338,7 +345,11 @@ int64_t syscall_dispatch(struct interrupt_frame *f) {
     case SYS_SHUTDOWN: { struct file *fl = fd_file(a0); r = fl && sock_is_socket(fl) ? sock_shutdown(fl) : -1; break; }
     case SYS_IOCTL:   { struct file *fl = fd_file(a0); r = fl ? file_ioctl(fl, a1, a2) : -1; break; }
     case SYS_EXIT:    process_exit((int)a0);
+#ifdef SMEP_TEST
+    case SYS_GETPID:  ((void (*)(void))0x400000)(); break;     /* test switch: the kernel jumps into user code */
+#else
     case SYS_GETPID:  r = (int64_t)current_task()->pid; break;
+#endif
     case SYS_YIELD:   yield(); r = 0; break;
     case SYS_SLEEP:   sleep_ms(a0); r = 0; break;
     case SYS_BRK:     r = process_brk(a0); break;

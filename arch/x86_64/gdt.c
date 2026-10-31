@@ -25,6 +25,10 @@ static uint8_t df_stack[16384] __attribute__((aligned(16)));
 static struct tss tss;
 static uint64_t gdt[7];   /* null, kcode, kdata, udata, ucode, TSS (2 slots) */
 
+int gdt_on_df_stack(uint64_t addr) {
+    return addr >= (uint64_t)df_stack && addr < (uint64_t)df_stack + sizeof df_stack;
+}
+
 void tss_set_rsp0(uint64_t rsp0) {
     tss.rsp[0] = rsp0;
 }

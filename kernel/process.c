@@ -10,6 +10,7 @@
 #include "spinlock.h"
 #include "string.h"
 #include "vfs.h"
+#include "cpu.h"
 
 #define PAGE        4096ULL
 #define STACK_TOP   0x00007FFFFFFFF000ULL     /* just above the highest stack byte; the page above stays unmapped */
@@ -140,7 +141,7 @@ long process_spawn(const char *path, char *const argv[]) {
     if (!si) { vmm_free_space(pml4); return -1; }
     si->entry = entry;
     si->rsp = rsp;
-    struct task_init ti = { pml4, end, end, MMAP_BASE, current_task(), current_task() };
+    struct task_init ti = { pml4, end, end, MMAP_BASE, current_task(), current_task(), 0 };
     return (long)task_create_ex(base_name(path), user_start, si, &ti)->pid;
 }
 
@@ -214,7 +215,8 @@ long process_fork(struct interrupt_frame *f) {
     if (!copy) { vmm_free_space(pml4); return -1; }
     *copy = *f;
     copy->rax = 0;                    /* fork returns 0 in the child */
-    struct task_init ti = { pml4, me->brk_start, me->brk, me->mmap_next, me, me };
+    fpu_save(me->fpu);                /* the child starts with the parent's floating-point registers */
+    struct task_init ti = { pml4, me->brk_start, me->brk, me->mmap_next, me, me, me };
     return (long)task_create_ex(me->name, fork_child, copy, &ti)->pid;
 }
 
@@ -228,6 +230,8 @@ long process_exec(const char *path, char *const argv[], struct interrupt_frame *
     uint64_t old = me->pml4;
     me->pml4 = pml4;
     task_set_space(pml4);
+    memcpy(me->fpu, fpu_default_state, sizeof me->fpu);      /* a new program starts with clean FPU/SSE registers */
+    fpu_restore(me->fpu);
     irq_restore(flags);
     if (old) vmm_free_space(old);
 
