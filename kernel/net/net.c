@@ -33,7 +33,7 @@ void eth_send(const uint8_t dst[6], uint16_t type, const void *payload, uint32_t
     memcpy(h->src, netif.mac, 6);
     h->type = htons(type);
     memcpy(frame + sizeof *h, payload, len);
-    if (virtio_net_send(frame, sizeof *h + len) == 0) {
+    if (nic_send(frame, sizeof *h + len) == 0) {
         netif.tx_frames++;
         netif.tx_bytes += sizeof *h + len;
     }
@@ -57,7 +57,7 @@ static void net_thread(void *arg) {
     (void)arg;
     uint64_t last_tick = 0;
     for (;;) {
-        int n = virtio_net_poll(rx_frame);
+        int n = nic_poll(rx_frame);
         uint64_t now = uptime_ms();
         if (now - last_tick >= 10) { tcp_tick(); last_tick = now; }
         if (!n) sleep_ms(1);                                    /* nothing waiting: polling costs a millisecond of latency */
@@ -65,12 +65,12 @@ static void net_thread(void *arg) {
 }
 
 void net_init(void) {
-    if (virtio_net_init(netif.mac) < 0) { kprintf("net: no network card\n"); return; }
+    if (nic_init(netif.mac) < 0) { kprintf("net: no network card\n"); return; }
     netif.ip   = IP4(10, 0, 2, 15);                             /* QEMU's user-mode network: static configuration */
     netif.mask = IP4(255, 255, 255, 0);
     netif.gw   = IP4(10, 0, 2, 2);
     netif.dns  = IP4(10, 0, 2, 3);
     netif.up = 1;
     rx_task = task_create("net", net_thread, 0);
-    kprintf("net: 10.0.2.15/24, gateway 10.0.2.2, dns 10.0.2.3\n");
+    kprintf("net: %s, 10.0.2.15/24, gateway 10.0.2.2, dns 10.0.2.3\n", nic_name());
 }

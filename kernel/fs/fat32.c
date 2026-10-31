@@ -636,7 +636,7 @@ static const struct vfs_ops fat_ops = {
 
 /* Mount the FAT32 volume on the first disk. Returns its root directory, or 0 if there is no usable volume. */
 struct vnode *fat32_mount(void) {
-    if (!virtio_blk_sectors()) return 0;
+    if (!blkdev_sectors()) return 0;
     uint8_t b[SECTOR_SIZE];
     if (blk_read(0, 1, b) < 0) return 0;
     if (b[510] != 0x55 || b[511] != 0xAA) { kprintf("fat32: no boot sector signature\n"); return 0; }

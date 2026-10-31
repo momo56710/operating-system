@@ -10,7 +10,11 @@
  *   sock:sendto(host, port, data)  sock:recvfrom([timeout_ms]) -> data, ip, port
  *   leos.ping(host [, timeout_ms])       -> milliseconds, or nil
  *   leos.dir(path)  leos.stat(path)  leos.getcwd()  leos.chdir(path)  leos.mkdir(path)
- *   leos.sleep(ms)  leos.uptime()  leos.netinfo()  leos.meminfo()  leos.ps() */
+ *   leos.sleep(ms)  leos.uptime()  leos.netinfo()  leos.meminfo()  leos.ps()
+ *   leos.diskinfo()  leos.getpid()  leos.remove(path)  leos.exists(path)
+ *   leos.spawn(path, arg1, ...)          -> process: run a program with its input and output on pipes
+ *   p:read()   p:write(s)   p:closeinput()   p:kill()   p:pid()   p:close()
+ *   leos.reap()                          -> pid, exit status of a finished child, or nil */
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -262,6 +266,101 @@ static int l_ps(lua_State *L) {
     return 1;
 }
 
+static int l_diskinfo(lua_State *L) {
+    struct si_disk d;
+    if (sysinfo(SI_DISK, 0, &d) < 0) return fail(L, "sysinfo failed");
+    lua_newtable(L);
+    lua_pushboolean(L, d.present != 0); lua_setfield(L, -2, "present");
+    set_int(L, "sectors", (lua_Integer)d.sectors);
+    set_int(L, "cache_hits", (lua_Integer)d.cache_hits); set_int(L, "cache_misses", (lua_Integer)d.cache_misses);
+    set_int(L, "sector_reads", (lua_Integer)d.sector_reads); set_int(L, "sector_writes", (lua_Integer)d.sector_writes);
+    return 1;
+}
+
+static int l_getpid(lua_State *L) { lua_pushinteger(L, getpid()); return 1; }
+static int l_remove(lua_State *L) { if (unlink(luaL_checkstring(L, 1)) < 0) return fail(L, "cannot remove"); lua_pushboolean(L, 1); return 1; }
+static int l_exists(lua_State *L) { struct stat st; lua_pushboolean(L, stat(luaL_checkstring(L, 1), &st) == 0); return 1; }
+
+/* ---- child processes with their input and output on pipes ---- */
+
+#define PROC_META "leos.proc"
+struct lproc { int pid, in, out; };          /* in: our write end of its stdin; out: our read end of its stdout and stderr */
+
+static struct lproc *check_proc(lua_State *L, int i) { return luaL_checkudata(L, i, PROC_META); }
+
+static int l_spawn(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    int n = lua_gettop(L);
+    if (n > 30) return luaL_error(L, "too many arguments");
+    char *argv[32];
+    argv[0] = (char *)path;
+    for (int i = 2; i <= n; i++) argv[i - 1] = (char *)luaL_checkstring(L, i);
+    argv[n < 1 ? 1 : n] = 0;
+    int pin[2], pout[2];
+    if (pipe(pin) < 0) return fail(L, "no pipes left");
+    if (pipe(pout) < 0) { close(pin[0]); close(pin[1]); return fail(L, "no pipes left"); }
+    int pid = fork();
+    if (pid < 0) { close(pin[0]); close(pin[1]); close(pout[0]); close(pout[1]); return fail(L, "cannot fork"); }
+    if (pid == 0) {
+        dup2(pin[0], 0); dup2(pout[1], 1); dup2(pout[1], 2);
+        for (int fd = 3; fd < 64; fd++) close(fd);
+        exec(path, argv);
+        _exit(127);
+    }
+    close(pin[0]); close(pout[1]);
+    struct lproc *p = lua_newuserdatauv(L, sizeof *p, 0);
+    p->pid = pid; p->in = pin[1]; p->out = pout[0];
+    luaL_setmetatable(L, PROC_META);
+    return 1;
+}
+
+/* p:read() -> text that has arrived (never waits), "" if nothing yet, or nil at the end of the output */
+static int p_read(lua_State *L) {
+    struct lproc *p = check_proc(L, 1);
+    if (p->out < 0) { lua_pushnil(L); return 1; }
+    long avail = ioctl(p->out, PIPE_AVAIL, 0);
+    if (avail == -2) { close(p->out); p->out = -1; lua_pushnil(L); return 1; }
+    if (avail <= 0) { lua_pushliteral(L, ""); return 1; }
+    char buf[4096];
+    long r = read(p->out, buf, avail > (long)sizeof buf ? sizeof buf : (size_t)avail);
+    if (r <= 0) { lua_pushliteral(L, ""); return 1; }
+    lua_pushlstring(L, buf, (size_t)r);
+    return 1;
+}
+
+static int p_write(lua_State *L) {
+    struct lproc *p = check_proc(L, 1);
+    size_t n;
+    const char *s = luaL_checklstring(L, 2, &n);
+    if (p->in < 0) return fail(L, "input is closed");
+    lua_pushboolean(L, write_all(p->in, s, n) >= 0);
+    return 1;
+}
+
+static int p_closeinput(lua_State *L) { struct lproc *p = check_proc(L, 1); if (p->in >= 0) { close(p->in); p->in = -1; } return 0; }
+static int p_kill(lua_State *L) { struct lproc *p = check_proc(L, 1); lua_pushboolean(L, kill(p->pid) == 0); return 1; }
+static int p_pid(lua_State *L) { lua_pushinteger(L, check_proc(L, 1)->pid); return 1; }
+
+static int p_close(lua_State *L) {
+    struct lproc *p = check_proc(L, 1);
+    if (p->in >= 0) { close(p->in); p->in = -1; }
+    if (p->out >= 0) { close(p->out); p->out = -1; }
+    return 0;
+}
+
+static int l_reap(lua_State *L) {
+    int status = 0;
+    int pid = waitpid_nohang(&status);
+    if (pid <= 0) return 0;
+    lua_pushinteger(L, pid); lua_pushinteger(L, status);
+    return 2;
+}
+
+static const luaL_Reg proc_methods[] = {
+    {"read", p_read}, {"write", p_write}, {"closeinput", p_closeinput}, {"kill", p_kill}, {"pid", p_pid}, {"close", p_close},
+    {NULL, NULL}
+};
+
 static const luaL_Reg sock_methods[] = {
     {"send", s_send}, {"recv", s_recv}, {"recvall", s_recvall}, {"sendto", s_sendto}, {"recvfrom", s_recvfrom},
     {"accept", s_accept}, {"shutdown", s_shutdown}, {"close", s_close}, {NULL, NULL}
@@ -271,6 +370,8 @@ static const luaL_Reg funcs[] = {
     {"resolve", l_resolve}, {"tcp", l_tcp}, {"listen", l_listen}, {"udp", l_udp}, {"ping", l_ping},
     {"dir", l_dir}, {"stat", l_stat}, {"getcwd", l_getcwd}, {"chdir", l_chdir}, {"mkdir", l_mkdir},
     {"sleep", l_sleep}, {"uptime", l_uptime}, {"netinfo", l_netinfo}, {"meminfo", l_meminfo}, {"ps", l_ps},
+    {"diskinfo", l_diskinfo}, {"getpid", l_getpid}, {"remove", l_remove}, {"exists", l_exists},
+    {"spawn", l_spawn}, {"reap", l_reap},
     {NULL, NULL}
 };
 
@@ -282,6 +383,11 @@ int luaopen_leos(lua_State *L) {
     lua_pushcfunction(L, s_close); lua_setfield(L, -2, "__gc");
     lua_pushcfunction(L, s_close); lua_setfield(L, -2, "__close");
     lua_pushcfunction(L, s_tostring); lua_setfield(L, -2, "__tostring");
+    lua_pop(L, 1);
+    luaL_newmetatable(L, PROC_META);
+    lua_pushvalue(L, -1); lua_setfield(L, -2, "__index");
+    luaL_setfuncs(L, proc_methods, 0);
+    lua_pushcfunction(L, p_close); lua_setfield(L, -2, "__gc");
     lua_pop(L, 1);
     luaL_newlib(L, funcs);
     return 1;

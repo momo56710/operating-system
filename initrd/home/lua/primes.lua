@@ -1,3 +1,6 @@
+--@ title: Primes
+--@ about: sieve of Eratosthenes
+--@ args: Limit (blank = 100000)
 -- Sieve of Eratosthenes.  lua /home/lua/primes.lua [limit]
 local limit = tonumber(arg[1]) or 100000
 local t0 = os.clock()

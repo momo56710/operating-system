@@ -24,6 +24,7 @@
 #include "pci.h"
 #include "net.h"
 #include "cpu.h"
+#include "input.h"
 extern void rtc_init(void);
 
 __attribute__((used, section(".limine_requests_start")))
@@ -81,7 +82,7 @@ static void init_thread(void *arg) {
         long pid = process_spawn("/bin/sh", argv);
         if (pid < 0) { kprintf("init: cannot start /bin/sh\n"); sleep_ms(2000); continue; }
         int status;
-        process_wait(&status);
+        process_wait(&status, 0);
         kprintf("\ninit: the shell exited (status %d), starting it again\n", status);
     }
 }
@@ -198,15 +199,16 @@ void kmain(void) {
     vfs_mount("/dev", devfs_new());
     kprintf("VFS: ramdisk on /, tmpfs on /tmp, devices on /dev\n");
 
-    if (virtio_blk_init() == 0) {
+    if (blkdev_init() == 0) {
         struct vnode *disk = fat32_mount();
         if (disk) { vfs_mount("/disk", disk); kprintf("VFS: FAT32 disk on /disk\n"); }
         else kprintf("disk: found, but it has no usable FAT32 volume\n");
     } else {
-        kprintf("disk: none (add -drive file=disk.img,if=virtio,format=raw)\n");
+        kprintf("disk: none (QEMU: -drive file=disk.img,if=virtio,format=raw, or an AHCI controller)\n");
     }
     net_init();
     keyboard_init();
+    mouse_init();
     lapic_timer_start(1000);
     kprintf("Scheduler ready, timer at 1000 Hz\n");
 

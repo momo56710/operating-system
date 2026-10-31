@@ -7,6 +7,7 @@
 #define VMM_USER  (1ULL << 2)
 #define VMM_PWT   (1ULL << 3)    /* write-combining after our PAT setup */
 #define VMM_PCD   (1ULL << 4)    /* uncached, for MMIO */
+#define VMM_DEVICE (1ULL << 9)   /* software bit: a device page mapped into a process; the frame is not the process's to free */
 #define VMM_NX    (1ULL << 63)
 
 extern uint64_t hhdm_offset;
@@ -35,3 +36,4 @@ uint64_t vmm_clone_space(uint64_t src);                                   /* for
 int      vmm_map_in(uint64_t pml4, uint64_t virt, uint64_t phys, uint64_t flags);
 uint64_t vmm_unmap_in(uint64_t pml4, uint64_t virt);
 uint64_t vmm_lookup(uint64_t pml4, uint64_t virt, uint64_t *flags);       /* phys or 0 */
+void *vmm_map_mmio(uint64_t phys, uint64_t bytes);   /* uncached mapping of device registers */

@@ -1,3 +1,5 @@
+--@ title: Lua tour
+--@ about: a quick tour of the language
 -- A quick tour of Lua running on LeOS.  Try:  lua /home/lua/tour.lua
 print(_VERSION .. " on LeOS, up " .. string.format("%.1f", os.clock()) .. " s")
 

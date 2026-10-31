@@ -13,6 +13,9 @@ static uint64_t fb_w, fb_h, fb_pitch;
 static uint32_t cols, rows, cur_x, cur_y;
 static uint32_t fg, bg;
 static int fb_ok;
+static int gui_mode;                  /* a program owns the screen: the text console stays quiet */
+static uint32_t shift_r, shift_g, shift_b;
+static uint64_t fb_size_bytes;
 
 /* What is on screen, so the cursor can be drawn and erased without losing the character under it. */
 static uint8_t cell_ch[MAX_ROWS][MAX_COLS];
@@ -92,6 +95,8 @@ void fb_init(struct limine_framebuffer *fb) {
     rows = fb_h / GLYPH_H;
     if (cols > MAX_COLS) cols = MAX_COLS;
     if (rows > MAX_ROWS) rows = MAX_ROWS;
+    shift_r = fb->red_mask_shift; shift_g = fb->green_mask_shift; shift_b = fb->blue_mask_shift;
+    fb_size_bytes = fb->pitch * fb->height;
     fg = pack(fb, 0xff, 0xf4, 0xe0);   /* warm white, matches the splash */
     bg = pack(fb, 0x0d, 0x0a, 0x1c);   /* deep purple */
     for (uint32_t r = 0; r < rows; r++) clear_cells(r, 0, cols);
@@ -106,7 +111,7 @@ void fb_get_size(uint32_t *c, uint32_t *r) {
 }
 
 void fb_clear(void) {
-    if (!fb_ok) return;
+    if (!fb_ok || gui_mode) return;
     for (uint32_t r = 0; r < rows; r++) clear_cells(r, 0, cols);
     cur_x = cur_y = 0;
     wrap_pending = 0;
@@ -150,7 +155,7 @@ static void csi_dispatch(char final) {
 }
 
 void fb_putc(char c) {
-    if (!fb_ok) return;
+    if (!fb_ok || gui_mode) return;
     draw_cursor(0);
 
     if (pstate == S_ESC) {
@@ -177,4 +182,24 @@ void fb_putc(char c) {
         if (cur_y >= rows) scroll();
     }
     draw_cursor(1);
+}
+
+extern uint64_t hhdm_offset;
+
+int fb_get_info(struct gfx_info *info, uint64_t *phys) {
+    if (!fb_ok) return -1;
+    info->width = (uint32_t)fb_w; info->height = (uint32_t)fb_h; info->pitch = (uint32_t)fb_pitch; info->bpp = 32;
+    info->red_shift = shift_r; info->green_shift = shift_g; info->blue_shift = shift_b; info->reserved = 0;
+    info->size = fb_size_bytes;
+    if (phys) *phys = (uint64_t)fb_base - hhdm_offset;
+    return 0;
+}
+
+void fb_set_gui(int on) {
+    gui_mode = on;
+    if (!on && fb_ok) {                                  /* the console takes the screen back, cleared */
+        for (uint32_t r = 0; r < rows; r++) clear_cells(r, 0, cols);
+        cur_x = cur_y = 0; wrap_pending = 0; inverse = 0; pstate = S_NORMAL;
+        draw_cursor(1);
+    }
 }

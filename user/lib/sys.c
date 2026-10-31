@@ -15,6 +15,8 @@ int  fork(void) {
     return (int)syscall3(SYS_FORK, 0, 0, 0);
 }
 int  exec(const char *name, char *const argv[]) { return (int)syscall3(SYS_EXEC, (long)name, (long)argv, 0); }
+int  waitpid_nohang(int *status) { return (int)syscall3(SYS_WAIT, (long)status, WNOHANG, 0); }
+int  kill(int pid) { return (int)syscall3(SYS_KILL, pid, 0, 0); }
 int  wait(int *status) { return (int)syscall3(SYS_WAIT, (long)status, 0, 0); }
 unsigned long uptime_ms(void) { return (unsigned long)syscall3(SYS_UPTIME, 0, 0, 0); }
 void *mmap(size_t len) { long r = syscall3(SYS_MMAP, (long)len, 0, 0); return r < 0 ? (void *)0 : (void *)r; }

@@ -218,3 +218,20 @@ void task_print_all(void) {
     } while (t != &idle_task);
     irq_restore(flags);
 }
+
+int task_kill_child(struct task *parent, uint64_t pid) {
+    int r = -1;
+    uint64_t flags = irq_save();
+    struct task *t = &idle_task;
+    do {
+        if (t->pid == pid && t->parent == parent && t->pml4 && t->state != TASK_ZOMBIE && t->state != TASK_DEFUNCT) {
+            t->killed = 1;
+            if (t->state == TASK_SLEEPING) t->wake_tick = 0;      /* wake it so it can notice */
+            r = 0;
+            break;
+        }
+        t = t->next;
+    } while (t != &idle_task);
+    irq_restore(flags);
+    return r;
+}

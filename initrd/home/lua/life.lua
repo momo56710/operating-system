@@ -1,3 +1,6 @@
+--@ title: Life
+--@ about: Conway cellular automaton
+--@ args: Generations (blank = 10)
 -- Conway's Game of Life.  lua /home/lua/life.lua [generations]
 local W, H, gens = 40, 14, tonumber(arg[1]) or 10
 local grid = {}

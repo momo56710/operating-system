@@ -1,3 +1,5 @@
+--@ title: System
+--@ about: memory, tasks, network
 -- What is the machine doing?  lua /home/lua/sysinfo.lua
 local m = leos.meminfo()
 print(("memory: %d MiB total, %d MiB free, kernel heap %d KiB, up %.1f s"):format(m.total_kb // 1024, m.free_kb // 1024, m.heap_used // 1024, m.uptime_ms / 1000))

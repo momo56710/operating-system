@@ -9,6 +9,8 @@
 #include "heap.h"
 #include "net.h"
 #include "cpu.h"
+#include "fb.h"
+#include "input.h"
 
 /* ---- checked access to user memory ---- */
 
@@ -266,6 +268,34 @@ static int64_t sys_netctl(uint64_t op, uint64_t uptr) {
 extern void disk_stats(struct si_disk *d);
 extern uint64_t wall_time(void);
 
+static int64_t sys_gfx(uint64_t op, uint64_t a1) {
+    struct task *t = current_task();
+    struct gfx_info gi;
+    uint64_t phys;
+    if (fb_get_info(&gi, &phys) < 0) return -1;
+    switch (op) {
+    case GFX_INFO: return copy_to_user(a1, &gi, sizeof gi);
+    case GFX_MAP:  return process_map_device(phys, gi.size);
+    case GFX_ACQUIRE: return gfx_acquire((uint32_t)t->pid, gi.width, gi.height);
+    case GFX_RELEASE: gfx_release((uint32_t)t->pid); return 0;
+    case GFX_POLL: {
+        struct gfx_poll p;
+        if (gfx_owner() != t->pid || copy_from_user(&p, a1, sizeof p) < 0 || !p.max) return -1;
+        if (p.max > 64) p.max = 64;
+        uint64_t deadline = uptime_ms() + (p.timeout_ms > 0 ? (uint64_t)p.timeout_ms : 0);
+        while (!input_pending() && p.timeout_ms != 0 && (p.timeout_ms < 0 || uptime_ms() < deadline))
+            sleep_ms(1);
+        struct input_event ev[64];
+        uint32_t n = 0;
+        while (n < p.max && input_pop(&ev[n])) n++;
+        if (n && copy_to_user(p.buf, ev, n * sizeof ev[0]) < 0) return -1;
+        p.count = n;
+        return copy_to_user(a1, &p, sizeof p);
+    }
+    }
+    return -1;
+}
+
 static int64_t sys_sysinfo(uint64_t what, uint64_t index, uint64_t ubuf) {
     switch (what) {
     case SI_MEM: {
@@ -359,9 +389,11 @@ int64_t syscall_dispatch(struct interrupt_frame *f) {
     case SYS_FORK:    r = process_fork(f); break;
     case SYS_UPTIME:  r = (int64_t)uptime_ms(); break;
     case SYS_TIME:    r = (int64_t)wall_time(); break;
+    case SYS_GFX:     r = sys_gfx(a0, a1); break;
+    case SYS_KILL:    r = task_kill_child(current_task(), a0); break;
     case SYS_WAIT: {
         int status = 0;
-        r = process_wait(&status);
+        r = process_wait(&status, (int)a1 & WNOHANG);
         if (r >= 0 && a0 && copy_to_user(a0, &status, sizeof status) < 0) r = -1;
         break;
     }
@@ -376,6 +408,7 @@ int64_t syscall_dispatch(struct interrupt_frame *f) {
     }
     default: r = -1;
     }
+    if (current_task()->killed) process_exit(137);
     f->rax = (uint64_t)r;
     return r;
 }

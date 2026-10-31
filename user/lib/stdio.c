@@ -39,7 +39,8 @@ static int std_init_done;
 static void std_init(void) {
     if (std_init_done) return;
     std_init_done = 1;
-    if (isatty(1)) f_stdout.flags |= F_LINE;           /* a terminal: show output as soon as a line is complete */
+    if (isatty(1) || ioctl(1, PIPE_AVAIL, 0) != -1)    /* a terminal, or a pipe someone is watching (the desktop): show each line as soon as it is complete */
+        f_stdout.flags |= F_LINE;
     f_stdin.next = &f_stdout; f_stdout.next = &f_stderr;
 }
 

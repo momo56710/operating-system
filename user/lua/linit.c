@@ -10,6 +10,7 @@
 #include "lauxlib.h"
 
 int luaopen_leos(lua_State *L);
+int luaopen_gfx(lua_State *L);
 
 static const luaL_Reg loadedlibs[] = {
   {LUA_GNAME, luaopen_base},
@@ -23,6 +24,7 @@ static const luaL_Reg loadedlibs[] = {
   {LUA_UTF8LIBNAME, luaopen_utf8},
   {LUA_DBLIBNAME, luaopen_debug},
   {"leos", luaopen_leos},
+  {"gfx", luaopen_gfx},
   {NULL, NULL}
 };
 

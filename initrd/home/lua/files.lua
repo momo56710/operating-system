@@ -1,3 +1,5 @@
+--@ title: Files demo
+--@ about: create, read and list files
 -- Files and the clock.  lua /home/lua/files.lua [directory]    (default /tmp)
 local dir = arg[1] or "/tmp"
 local path = dir .. "/lua_demo.txt"

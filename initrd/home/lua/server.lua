@@ -1,3 +1,6 @@
+--@ title: Web server
+--@ about: a tiny HTTP server in Lua
+--@ args: Port and requests (blank = 8080 3)
 -- A tiny web server written in Lua.  lua /home/lua/server.lua [port] [requests]
 -- From the host, with QEMU_NET_FWD=,hostfwd=tcp::8080-:8080 :  curl http://127.0.0.1:8080/
 local port, limit = tonumber(arg[1]) or 8080, tonumber(arg[2]) or 3

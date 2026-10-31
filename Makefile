@@ -32,7 +32,7 @@ OBJS    := $(SRCS:%.c=build/%.o) $(ASMSRCS:%.asm=build/%.asm.o)
 
 # ---- user programs: separate ELF files (the kernel saves their FPU/SSE state on every context switch) ----
 USER_PROGS := sh nano mv lua fpdemo libctest ifconfig ping nslookup wget nc echoserv cksum ls cat echo cp rm mkdir touch wc grep head ps mem sleep uptime \
-              hello args crash forktest umem count primes fib sortdemo tree life mandel bench
+              hello args crash forktest umem count primes fib sortdemo tree life mandel bench gfxtest
 USER_CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -ffreestanding -fno-stack-protector -fno-pic -fno-pie \
                -mno-red-zone -m64 -Iuser/include -Iabi -MMD -MP
 USER_LIB_SRCS := $(wildcard user/lib/*.c)
@@ -68,11 +68,15 @@ build/user/%.elf: build/user/progs/%.o $(USER_LIB_OBJS) user/user.ld
 LUA_DIR    := third_party/lua/src
 # our own linit.c (same libraries plus "leos") replaces Lua's; leoslib.c is the LeOS library
 LUA_SRCS   := $(filter-out $(LUA_DIR)/luac.c $(LUA_DIR)/linit.c,$(wildcard $(LUA_DIR)/*.c))
-LUA_OBJS   := $(LUA_SRCS:%.c=build/%.o) build/user/lua/linit.o build/user/lua/leoslib.o
+LUA_OBJS   := $(LUA_SRCS:%.c=build/%.o) build/user/lua/linit.o build/user/lua/leoslib.o build/user/lua/gfxlib.o build/user/lua/font8x16.o
 LUA_CFLAGS := -std=gnu99 -O2 -w -ffreestanding -fno-stack-protector -fno-pic -fno-pie -mno-red-zone -m64 \
               -Iuser/include -Iabi -I$(LUA_DIR) -DLUA_ROOT='"/disk/"'
 
 build/user/lua/%.o: user/lua/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(LUA_CFLAGS) -c $< -o $@
+
+build/user/lua/font8x16.o: kernel/drivers/font8x16.c
 	@mkdir -p $(dir $@)
 	$(CC) $(LUA_CFLAGS) -c $< -o $@
 

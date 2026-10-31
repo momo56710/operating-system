@@ -4,6 +4,7 @@
 #include "sync.h"
 #include "spinlock.h"
 #include "io.h"
+#include "input.h"
 
 /* Scancode set 1 (what QEMU's PS/2 controller delivers), keys 0x00-0x39. */
 static const char normal[58] __attribute__((nonstring)) =
@@ -11,7 +12,7 @@ static const char normal[58] __attribute__((nonstring)) =
 static const char shifted[58] __attribute__((nonstring)) =
     "\0\0" "!@#$%^&*()_+" "\b\t" "QWERTYUIOP{}" "\n\0" "ASDFGHJKL:\"~" "\0|" "ZXCVBNM<>?" "\0*\0 ";
 
-static int shift, caps, ctrl, extended;
+static int shift, caps, ctrl, alt, extended;
 
 /* Typed characters wait here until a task reads them with kbd_getc(). */
 #define QSIZE 128
@@ -40,9 +41,7 @@ char kbd_getc(void) {
  * usual ANSI sequences, e.g. Up = ESC [ A, Delete = ESC [ 3 ~. */
 static void push_seq(const char *s) { while (*s) kbd_push(*s++); }
 
-static void extended_key(uint8_t sc, int release) {
-    if (sc == 0x1D) { ctrl = !release; return; }                   /* right Ctrl */
-    if (release) return;
+static void extended_key(uint8_t sc) {                          /* console path: the grey keys become ANSI sequences */
     switch (sc) {
     case 0x48: push_seq("\x1b[A"); break;
     case 0x50: push_seq("\x1b[B"); break;
@@ -61,22 +60,35 @@ static void extended_key(uint8_t sc, int release) {
 static void keyboard_irq(void) {
     uint8_t sc = inb(0x60);
     if (sc == 0xE0) { extended = 1; return; }
+    if (sc == 0xE1) return;                                       /* the Pause key's long sequence: ignored */
     int release = sc & 0x80;
     sc &= 0x7F;
-    if (extended) { extended = 0; extended_key(sc, release); return; }
+    int ext = extended;
+    extended = 0;
 
-    if (sc == 0x2A || sc == 0x36) { shift = !release; return; }
-    if (sc == 0x1D) { ctrl = !release; return; }
-    if (release) return;
-    if (sc == 0x3A) { caps = !caps; return; }
-    if (sc >= sizeof normal) return;
+    /* modifier state, shared by both paths */
+    if (!ext && (sc == 0x2A || sc == 0x36)) shift = !release;
+    else if (sc == 0x1D) ctrl = !release;                         /* left or right Ctrl */
+    else if (sc == 0x38) alt = !release;                          /* left Alt or AltGr */
+    else if (!ext && sc == 0x3A && !release) caps = !caps;
 
-    char c = (shift ? shifted : normal)[sc];
-    if (caps && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
-        c ^= 0x20;                            /* flip letter case */
-    if (!c) return;
+    char plain = 0;                                               /* the character this key types, shift and caps applied */
+    if (!ext && !release && sc < sizeof normal) {
+        plain = (shift ? shifted : normal)[sc];
+        if (caps && ((plain >= 'a' && plain <= 'z') || (plain >= 'A' && plain <= 'Z'))) plain ^= 0x20;
+    }
+
+    if (input_gui_active()) {                                     /* a program owns the screen: raw events, nothing for the console */
+        uint32_t mods = (shift ? MOD_SHIFT : 0) | (ctrl ? MOD_CTRL : 0) | (alt ? MOD_ALT : 0) | (caps ? MOD_CAPS : 0);
+        input_key(sc | (ext ? 0x100 : 0), !release, plain, mods);
+        return;
+    }
+
+    if (ext) { if (!release) extended_key(sc); return; }
+    if (sc == 0x2A || sc == 0x36 || sc == 0x1D || sc == 0x38 || sc == 0x3A) return;
+    if (release || !plain) return;
+    char c = plain;
     if (ctrl && ((c | 0x20) >= 'a' && (c | 0x20) <= 'z')) c &= 0x1F;     /* Ctrl-D is 4 */
-
     kbd_push(c);
 }
 

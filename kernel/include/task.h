@@ -26,6 +26,7 @@ struct task {
     struct task    *parent;
     int             exit_code;
     int             waiting;      /* blocked in wait() */
+    int             killed;       /* kill() was called: the process dies when it next runs in user mode */
     struct file    *fds[FD_MAX];  /* open files; 0, 1, 2 are stdin, stdout, stderr */
     char            cwd[CWD_MAX];
     uint8_t         fpu[512] __attribute__((aligned(16)));   /* FXSAVE area; only user tasks use it */
@@ -55,3 +56,4 @@ void         task_use_kernel_space(void);     /* load the kernel's own (before f
 int          task_info(uint64_t index, struct si_task *out);   /* for sysinfo(SI_TASK) */
 struct task *task_find_child(struct task *parent, int defunct_only);
 void         task_orphan_children(struct task *parent);
+int          task_kill_child(struct task *parent, uint64_t pid);   /* 0 ok, -1 if pid is not a live child */

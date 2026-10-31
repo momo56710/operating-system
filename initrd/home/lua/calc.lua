@@ -1,3 +1,5 @@
+--@ title: Lua calc
+--@ about: type Lua expressions, one per line
 -- A calculator: type Lua expressions, one per line (Ctrl-D to stop).  lua /home/lua/calc.lua
 print("Type an expression, e.g.  2^10 + math.sqrt(16)   or   string.rep('ab', 3)")
 local env = setmetatable({}, { __index = function(_, k) if math[k] ~= nil then return math[k] end return _G[k] end })   -- math.* first, then everything else

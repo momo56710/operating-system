@@ -19,10 +19,18 @@ struct netif {
 };
 extern struct netif netif;
 
-/* driver */
-int  virtio_net_init(uint8_t mac[6]);                                 /* 0 ok, -1 no network card */
-int  virtio_net_send(const void *frame, uint32_t len);                /* 0 ok */
-int  virtio_net_poll(void (*cb)(const uint8_t *frame, uint32_t len)); /* frames handed to cb; returns how many */
+/* the network card, whichever kind the machine has: virtio-net (QEMU) or Intel e1000 (VirtualBox, VMware, QEMU) */
+int  nic_init(uint8_t mac[6]);                                        /* 0 ok, -1 no network card */
+int  nic_send(const void *frame, uint32_t len);                       /* 0 ok */
+int  nic_poll(void (*cb)(const uint8_t *frame, uint32_t len));        /* frames handed to cb; returns how many */
+const char *nic_name(void);
+
+int  virtio_net_init(uint8_t mac[6]);                                 /* the drivers: 0 ok, -1 no such card */
+int  virtio_net_send(const void *frame, uint32_t len);
+int  virtio_net_poll(void (*cb)(const uint8_t *frame, uint32_t len));
+int  e1000_init(uint8_t mac[6]);
+int  e1000_send(const void *frame, uint32_t len);
+int  e1000_poll(void (*cb)(const uint8_t *frame, uint32_t len));
 
 /* stack */
 #define ETH_IP  0x0800

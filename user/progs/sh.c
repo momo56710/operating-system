@@ -86,6 +86,24 @@ static void exec_program(char **argv) {
             exec(path, argv);
         }
     }
+    size_t n = strlen(argv[0]);
+    if (n > 4 && !strcmp(argv[0] + n - 4, ".lua")) {          /* `primes.lua` runs the script with Lua */
+        static const char *lua_dirs[] = { "", "/home/lua/", "/disk/lua/", 0 };
+        static char script[256];
+        struct stat st;
+        for (int i = 0; lua_dirs[i]; i++) {
+            strcpy(script, lua_dirs[i]);
+            strcat(script, argv[0]);
+            if (stat(script, &st) < 0 || st.type != FT_FILE) continue;
+            char *nargv[MAX_ARGS + 2];
+            int k = 0;
+            nargv[k++] = "lua";
+            nargv[k++] = script;
+            for (int j = 1; argv[j] && k < MAX_ARGS + 1; j++) nargv[k++] = argv[j];
+            nargv[k] = 0;
+            exec("/bin/lua", nargv);
+        }
+    }
     dprintf(2, "sh: %s: command not found\n", argv[0]);
     exit(127);
 }

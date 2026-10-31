@@ -1,3 +1,6 @@
+--@ title: Web client
+--@ about: fetch a web page over TCP
+--@ args: URL (blank for example.com)
 -- A web client in 15 lines of Lua.  lua /home/lua/http.lua http://example.com/
 local url = arg[1] or "http://example.com/"
 local host, port, path = url:match("^http://([^:/]+):?(%d*)(/?.*)$")

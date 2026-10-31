@@ -24,6 +24,8 @@ int  munmap(void *addr, size_t len);
 int  fork(void);
 int  exec(const char *name, char *const argv[]);
 int  wait(int *status);
+int  waitpid_nohang(int *status);   /* 0 if no child has finished yet */
+int  kill(int pid);
 unsigned long uptime_ms(void);
 
 int  open(const char *path, int flags);

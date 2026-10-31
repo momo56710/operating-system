@@ -1,4 +1,5 @@
 #include "process.h"
+#include "input.h"
 #include "task.h"
 #include "elf.h"
 #include "modules.h"
@@ -150,6 +151,7 @@ void process_exit(int code) {
     struct task *t = current_task();
     for (int i = 0; i < FD_MAX; i++)             /* closing the last write end of a pipe is what lets its reader see end of file */
         if (t->fds[i]) { file_close(t->fds[i]); t->fds[i] = 0; }
+    gfx_release((uint32_t)t->pid);                /* a dying GUI hands the screen and the input back */
     console_set_cooked();                        /* a program that dies in raw mode must not leave the console that way */
     irq_save();
     uint64_t pml4 = t->pml4;
@@ -168,7 +170,7 @@ void process_exit(int code) {
     panic("an exited process was scheduled again");
 }
 
-long process_wait(int *status) {
+long process_wait(int *status, int nohang) {
     struct task *me = current_task();
     for (;;) {
         uint64_t f = irq_save();
@@ -182,6 +184,7 @@ long process_wait(int *status) {
             return pid;
         }
         if (!task_find_child(me, 0)) { irq_restore(f); return -1; }
+        if (nohang) { irq_restore(f); return 0; }
         me->waiting = 1;
         me->state = TASK_BLOCKED;
         schedule();
@@ -293,6 +296,21 @@ long process_mmap(uint64_t len) {
         }
     }
     t->mmap_next = base + (pages + 1) * PAGE;      /* one unmapped guard page after every mapping */
+    return (long)base;
+}
+
+/* Map the framebuffer's physical frames into this process (write-combined, never freed with it). */
+long process_map_device(uint64_t phys, uint64_t len) {
+    struct task *t = current_task();
+    if (!t->pml4 || !len) return -1;
+    uint64_t base = t->mmap_next, pages = page_up(len) / PAGE;
+    if (base + (pages + 1) * PAGE >= USER_MAX) return -1;
+    for (uint64_t i = 0; i < pages; i++)
+        if (vmm_map_in(t->pml4, base + i * PAGE, phys + i * PAGE, VMM_USER | VMM_WRITE | VMM_PWT | VMM_NX | VMM_DEVICE) < 0) {
+            for (uint64_t j = 0; j < i; j++) vmm_unmap_in(t->pml4, base + j * PAGE);
+            return -1;
+        }
+    t->mmap_next = base + (pages + 1) * PAGE;
     return (long)base;
 }
 

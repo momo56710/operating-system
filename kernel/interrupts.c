@@ -76,6 +76,7 @@ void interrupt_handler(struct interrupt_frame *f) {
     } else if (f->vector == VEC_TIMER) {
         irq_eoi();                            /* before switching tasks, or the APIC stays blocked */
         sched_tick();
+        if ((f->cs & 3) && current_task()->killed) process_exit(137);   /* kill(): leave from user mode */
     } else if (f->vector == VEC_SPURIOUS) {
         return;                               /* spurious: no EOI */
     } else if (f->vector >= IRQ_BASE && f->vector < IRQ_BASE + 16) {

@@ -248,7 +248,7 @@ void vmm_free_space(uint64_t pml4) {
                 if (!(l2[i2] & PTE_P)) continue;
                 uint64_t *l1 = table(l2[i2] & PTE_ADDR);
                 for (int i1 = 0; i1 < 512; i1++)
-                    if (l1[i1] & PTE_P) pmm_free_frame(l1[i1] & PTE_ADDR);
+                    if ((l1[i1] & PTE_P) && !(l1[i1] & VMM_DEVICE)) pmm_free_frame(l1[i1] & PTE_ADDR);   /* device memory is not ours to free */
                 pmm_free_frame(l2[i2] & PTE_ADDR);
             }
             pmm_free_frame(l3[i3] & PTE_ADDR);
@@ -276,6 +276,10 @@ uint64_t vmm_clone_space(uint64_t src) {
                     if (!(l1[i1] & PTE_P)) continue;
                     uint64_t va = ((uint64_t)i4 << 39) | ((uint64_t)i3 << 30) |
                                   ((uint64_t)i2 << 21) | ((uint64_t)i1 << 12);
+                    if (l1[i1] & VMM_DEVICE) {                         /* shared hardware memory: map the same frame */
+                        vmm_map_in(dst, va, l1[i1] & PTE_ADDR, l1[i1] & (0xFFFULL | VMM_NX) & ~1ULL);
+                        continue;
+                    }
                     uint64_t frame = pmm_alloc_frame();
                     if (!frame) { vmm_free_space(dst); return 0; }
                     memcpy(table(frame), table(l1[i1] & PTE_ADDR), PAGE_SIZE);
@@ -316,4 +320,16 @@ int vmm_handle_fault(uint64_t addr, uint64_t error) {
         return 1;
     }
     return 0;
+}
+
+/* Map device registers (uncached) into the direct-map area and return their address. The direct map only
+ * covers RAM, so devices need this. Maps whole pages; already-mapped pages are left alone. */
+void *vmm_map_mmio(uint64_t phys, uint64_t bytes) {
+    uint64_t start = phys & ~(SIZE_4K - 1), end = (phys + bytes + SIZE_4K - 1) & ~(SIZE_4K - 1);
+    for (uint64_t p = start; p < end; p += SIZE_4K) {
+        uint64_t virt = p + hhdm_offset;
+        if (!vmm_translate(virt) && vmm_map(virt, p, VMM_WRITE | VMM_NX | VMM_PCD) < 0)
+            panic("cannot map device registers at %lx", p);
+    }
+    return (void *)(phys + hhdm_offset);
 }

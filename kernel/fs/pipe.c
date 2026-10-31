@@ -2,6 +2,7 @@
 #include "sync.h"
 #include "heap.h"
 #include "string.h"
+#include "abi.h"
 
 #define PIPE_BUF_SIZE 4096
 
@@ -69,7 +70,17 @@ static void pipe_close(struct vnode *v, int flags) {      /* one end was closed 
 
 static void pipe_release(struct vnode *v) { kfree(v->priv); }
 
-static const struct vfs_ops pipe_ops = { .read = pipe_read, .write = pipe_write, .close = pipe_close, .release = pipe_release };
+static int64_t pipe_ioctl(struct vnode *v, uint64_t req, uint64_t arg) {
+    (void)arg;
+    if (req != PIPE_AVAIL) return -1;
+    struct pipe *p = v->priv;
+    uint64_t f = spin_lock_irqsave(&p->lock);
+    int64_t r = p->count ? (int64_t)p->count : (p->writers ? 0 : -2);
+    spin_unlock_irqrestore(&p->lock, f);
+    return r;
+}
+
+static const struct vfs_ops pipe_ops = { .read = pipe_read, .write = pipe_write, .close = pipe_close, .release = pipe_release, .ioctl = pipe_ioctl };
 
 int pipe_create(struct file **rd, struct file **wr) {
     struct pipe *p = kmalloc(sizeof *p);

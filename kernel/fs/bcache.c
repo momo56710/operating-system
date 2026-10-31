@@ -41,7 +41,7 @@ int blk_read(uint64_t sector, uint32_t count, void *buf) {
         spin_unlock_irqrestore(&cache_lock, f);
 
         uint8_t tmp[8 * SECTOR_SIZE];
-        if (virtio_blk_rw(sec, run, tmp, 0) < 0) return -1;
+        if (blkdev_rw(sec, run, tmp, 0) < 0) return -1;
         f = spin_lock_irqsave(&cache_lock);
         for (uint32_t k = 0; k < run; k++) {
             unsigned s = slot_of(sec + k);
@@ -62,7 +62,7 @@ int blk_write(uint64_t sector, uint32_t count, const void *buf) {
     const uint8_t *in = buf;
     for (uint32_t i = 0; i < count; ) {
         uint32_t run = count - i < 8 ? count - i : 8;
-        if (virtio_blk_rw(sector + i, run, (void *)(in + i * SECTOR_SIZE), 1) < 0) return -1;
+        if (blkdev_rw(sector + i, run, (void *)(in + i * SECTOR_SIZE), 1) < 0) return -1;
         uint64_t f = spin_lock_irqsave(&cache_lock);
         for (uint32_t k = 0; k < run; k++) {
             unsigned s = slot_of(sector + i + k);
@@ -78,7 +78,7 @@ int blk_write(uint64_t sector, uint32_t count, const void *buf) {
 }
 
 void disk_stats(struct si_disk *d) {
-    d->sectors = virtio_blk_sectors();
+    d->sectors = blkdev_sectors();
     d->present = d->sectors != 0;
     d->cache_hits = hits;
     d->cache_misses = misses;

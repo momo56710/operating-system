@@ -40,10 +40,22 @@
 #define SYS_NETCTL   34 /* netctl(op, struct *) */
 #define SYS_SHUTDOWN 35 /* shutdown(fd): no more sending; reading continues */
 #define SYS_TIME     36 /* seconds since 1970-01-01 00:00:00 UTC */
+#define SYS_KILL     38 /* kill(pid): stop a child process */
+#define SYS_GFX      37 /* gfx(op, arg1, arg2): direct screen access and raw keyboard/mouse input */
+
+/* gfx operations */
+#define GFX_INFO     1  /* arg1: struct gfx_info * */
+#define GFX_MAP      2  /* map the framebuffer into this process; returns its address */
+#define GFX_ACQUIRE  3  /* take over the screen and the input devices (the text console goes quiet) */
+#define GFX_RELEASE  4  /* give them back */
+#define GFX_POLL     5  /* arg1: struct gfx_poll *: wait for input events */
 
 /* ioctl requests */
 #define TTY_RAW  1      /* arg 1: deliver every key as it is typed, no echo or line editing; 0: normal line mode */
 #define TTY_SIZE 2      /* returns (rows << 16) | columns */
+#define PIPE_AVAIL 3    /* on a pipe: bytes that can be read right now; 0 = none yet; -2 = empty and every writer is gone */
+
+#define WNOHANG 1       /* wait(status, WNOHANG): return 0 at once if no child has finished */
 
 #define O_RDONLY 0
 #define O_WRONLY 1
@@ -132,4 +144,38 @@ struct ping_req {
     uint32_t seq;
     int32_t  timeout_ms;
     int32_t  rtt_ms;              /* out: round-trip time, or -1 */
+};
+
+/* ---- graphics and input ---- */
+struct gfx_info {
+    uint32_t width, height, pitch, bpp;       /* pitch in bytes */
+    uint32_t red_shift, green_shift, blue_shift, reserved;
+    uint64_t size;                            /* bytes of framebuffer memory */
+};
+
+#define EV_KEY   1
+#define EV_MOUSE 2
+#define MOD_SHIFT 1
+#define MOD_CTRL  2
+#define MOD_ALT   4
+#define MOD_CAPS  8
+
+struct input_event {
+    uint32_t type;                            /* EV_KEY or EV_MOUSE */
+    int32_t  code;                            /* EV_KEY: scancode (+0x100 for the grey extended keys such as the arrows) */
+    int32_t  value;                           /* EV_KEY: 1 pressed, 0 released */
+    int32_t  ch;                              /* EV_KEY: the character typed (shift and caps applied), or 0 */
+    int32_t  x, y;                            /* EV_MOUSE: pointer position in pixels */
+    int32_t  wheel;                           /* EV_MOUSE: scroll steps (+ = away from you) */
+    uint32_t buttons;                         /* EV_MOUSE: bit 0 left, 1 right, 2 middle */
+    uint32_t mods;                            /* MOD_* at the time of the event */
+    uint32_t reserved;
+};
+
+struct gfx_poll {
+    uint64_t buf;                             /* struct input_event array */
+    uint32_t max;
+    int32_t  timeout_ms;                      /* 0: do not wait; < 0: wait forever */
+    uint32_t count;                           /* out: events stored */
+    uint32_t reserved;
 };
