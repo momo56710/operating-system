@@ -39,6 +39,7 @@
 #define SYS_RECVFROM 33 /* recvfrom(fd, struct sockmsg *) -> bytes, 0 at end of stream, -1 on error or timeout */
 #define SYS_NETCTL   34 /* netctl(op, struct *) */
 #define SYS_SHUTDOWN 35 /* shutdown(fd): no more sending; reading continues */
+#define SYS_TIME     36 /* seconds since 1970-01-01 00:00:00 UTC */
 
 /* ioctl requests */
 #define TTY_RAW  1      /* arg 1: deliver every key as it is typed, no echo or line editing; 0: normal line mode */

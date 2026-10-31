@@ -14,7 +14,8 @@
 
 #define PAGE        4096ULL
 #define STACK_TOP   0x00007FFFFFFFF000ULL     /* just above the highest stack byte; the page above stays unmapped */
-#define STACK_PAGES 32                        /* 128 KiB */
+#define STACK_PAGES 32                        /* 128 KiB mapped at start; the rest is added on demand */
+#define STACK_MAX   (8ULL << 20)              /* the stack may grow to 8 MiB */
 #define MMAP_BASE   0x0000000100000000ULL
 #define MMAP_MAX    (256ULL << 20)            /* per call */
 #define BRK_LIMIT   0x00000000F0000000ULL
@@ -248,6 +249,15 @@ long process_exec(const char *path, char *const argv[], struct interrupt_frame *
     f->cs = 0x23;
     f->ss = 0x1B;
     return 0;
+}
+
+/* A touch just below the mapped part of the stack: map another page, up to STACK_MAX. 1 if it was ours to fix. */
+int process_grow_stack(uint64_t addr) {
+    struct task *t = current_task();
+    if (!t->pml4 || addr >= STACK_TOP || addr < STACK_TOP - STACK_MAX) return 0;
+    uint64_t page = addr & ~(PAGE - 1);
+    if (vmm_lookup(t->pml4, page, 0)) return 0;                   /* already there: this is a different kind of fault */
+    return map_user_page(t->pml4, page) == 0;
 }
 
 long process_brk(uint64_t addr) {

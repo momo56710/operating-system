@@ -31,12 +31,13 @@ OBJS    := $(SRCS:%.c=build/%.o) $(ASMSRCS:%.asm=build/%.asm.o)
 -include $(OBJS:.o=.d)
 
 # ---- user programs: separate ELF files (the kernel saves their FPU/SSE state on every context switch) ----
-USER_PROGS := sh nano mv fpdemo ifconfig ping nslookup wget nc echoserv cksum ls cat echo cp rm mkdir touch wc grep head ps mem sleep uptime \
+USER_PROGS := sh nano mv lua fpdemo libctest ifconfig ping nslookup wget nc echoserv cksum ls cat echo cp rm mkdir touch wc grep head ps mem sleep uptime \
               hello args crash forktest umem count primes fib sortdemo tree life mandel bench
 USER_CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -ffreestanding -fno-stack-protector -fno-pic -fno-pie \
                -mno-red-zone -m64 -Iuser/include -Iabi -MMD -MP
 USER_LIB_SRCS := $(wildcard user/lib/*.c)
-USER_LIB_OBJS := $(USER_LIB_SRCS:%.c=build/%.o) build/user/lib/crt0.o
+USER_LIB_ASM  := $(wildcard user/lib/*.S)
+USER_LIB_OBJS := $(USER_LIB_SRCS:%.c=build/%.o) $(USER_LIB_ASM:%.S=build/%.o)
 # Programs that live only on the disk image (/disk/bin), not on the ramdisk
 DISK_PROGS := greet
 USER_ELFS := $(USER_PROGS:%=build/user/%.elf) $(DISK_PROGS:%=build/user/%.elf)
@@ -49,7 +50,10 @@ build/initrd.tar: $(USER_ELFS) $(INITRD_FILES)
 	$(foreach p,$(USER_PROGS),cp build/user/$(p).elf build/initrd/bin/$(p);)
 	tar --format=ustar --owner=0 --group=0 --numeric-owner -cf $@ -C build/initrd .
 
-build/user/lib/crt0.o: user/lib/crt0.S
+# the C library must not have its loops turned back into calls to itself
+build/user/lib/%.o: USER_CFLAGS += -fno-builtin -fno-tree-loop-distribute-patterns
+
+build/user/lib/%.o: user/lib/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
@@ -59,6 +63,25 @@ build/user/%.o: user/%.c
 
 build/user/%.elf: build/user/progs/%.o $(USER_LIB_OBJS) user/user.ld
 	$(LD) -nostdlib -static -z max-page-size=0x1000 -T user/user.ld $(USER_LIB_OBJS) $< -o $@
+
+# ---- Lua: third_party/lua, compiled unmodified against the LeOS C library ----
+LUA_DIR    := third_party/lua/src
+# our own linit.c (same libraries plus "leos") replaces Lua's; leoslib.c is the LeOS library
+LUA_SRCS   := $(filter-out $(LUA_DIR)/luac.c $(LUA_DIR)/linit.c,$(wildcard $(LUA_DIR)/*.c))
+LUA_OBJS   := $(LUA_SRCS:%.c=build/%.o) build/user/lua/linit.o build/user/lua/leoslib.o
+LUA_CFLAGS := -std=gnu99 -O2 -w -ffreestanding -fno-stack-protector -fno-pic -fno-pie -mno-red-zone -m64 \
+              -Iuser/include -Iabi -I$(LUA_DIR) -DLUA_ROOT='"/disk/"'
+
+build/user/lua/%.o: user/lua/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(LUA_CFLAGS) -c $< -o $@
+
+build/third_party/lua/src/%.o: third_party/lua/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(LUA_CFLAGS) -c $< -o $@
+
+build/user/lua.elf: $(LUA_OBJS) $(USER_LIB_OBJS) user/user.ld
+	$(LD) -nostdlib -static -z max-page-size=0x1000 -T user/user.ld $(USER_LIB_OBJS) $(LUA_OBJS) -o $@
 
 -include $(wildcard build/user/*/*.d)
 

@@ -67,6 +67,8 @@ static void exception(struct interrupt_frame *f) {
 void interrupt_handler(struct interrupt_frame *f) {
     if (f->vector == 14 && vmm_handle_fault(read_cr(2), f->error))
         return;                               /* a lazily mapped page: retry the access */
+    if (f->vector == 14 && (f->cs & 3) && !(f->error & 1) && process_grow_stack(read_cr(2)))
+        return;                               /* the user stack grew: retry the access */
     if (f->vector < 32) {
         if (f->cs & 3)                          /* a user program misbehaved: kill it, not the kernel */
             process_fault(f, exception_names[f->vector]);

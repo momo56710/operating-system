@@ -34,7 +34,7 @@ struct file {
     int           refs;              /* descriptors sharing this open file (dup, fork) */
 };
 
-#define FD_MAX  16
+#define FD_MAX  64
 #define CWD_MAX 128
 
 struct vnode *vnode_new(int type, const struct vfs_ops *ops, void *priv, uint64_t size);

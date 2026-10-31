@@ -1,11 +1,19 @@
 #include "sys.h"
 
+/* Provided by stdio.c when it is linked: flush buffered output before reading input or forking. */
+extern void __stdio_prepare_read(void) __attribute__((weak));
+extern void __stdio_flush_all(void) __attribute__((weak));
+
 long write(int fd, const void *buf, size_t len) { return syscall3(SYS_WRITE, fd, (long)buf, (long)len); }
-void exit(int code) { syscall3(SYS_EXIT, code, 0, 0); for (;;) ; }
+void _exit(int code) { syscall3(SYS_EXIT, code, 0, 0); for (;;) ; }
+long time_seconds(void) { return syscall3(SYS_TIME, 0, 0, 0); }
 int  getpid(void) { return (int)syscall3(SYS_GETPID, 0, 0, 0); }
 void yield(void) { syscall3(SYS_YIELD, 0, 0, 0); }
 void sleep_ms(unsigned long ms) { syscall3(SYS_SLEEP, (long)ms, 0, 0); }
-int  fork(void) { return (int)syscall3(SYS_FORK, 0, 0, 0); }
+int  fork(void) {
+    if (__stdio_flush_all) __stdio_flush_all();                          /* buffered output must not be duplicated into the child */
+    return (int)syscall3(SYS_FORK, 0, 0, 0);
+}
 int  exec(const char *name, char *const argv[]) { return (int)syscall3(SYS_EXEC, (long)name, (long)argv, 0); }
 int  wait(int *status) { return (int)syscall3(SYS_WAIT, (long)status, 0, 0); }
 unsigned long uptime_ms(void) { return (unsigned long)syscall3(SYS_UPTIME, 0, 0, 0); }
@@ -23,7 +31,10 @@ void *sbrk(long increment) {
 
 int  open(const char *path, int flags) { return (int)syscall3(SYS_OPEN, (long)path, flags, 0); }
 int  close(int fd) { return (int)syscall3(SYS_CLOSE, fd, 0, 0); }
-long read(int fd, void *buf, size_t len) { return syscall3(SYS_READ, fd, (long)buf, (long)len); }
+long read(int fd, void *buf, size_t len) {
+    if (fd == 0 && __stdio_prepare_read) __stdio_prepare_read();        /* show a pending prompt before waiting for input */
+    return syscall3(SYS_READ, fd, (long)buf, (long)len);
+}
 long lseek(int fd, long off, int whence) { return syscall3(SYS_LSEEK, fd, off, whence); }
 int  stat(const char *path, struct stat *st) { return (int)syscall3(SYS_STAT, (long)path, (long)st, 0); }
 int  readdir(int fd, unsigned long index, struct dirent *d) { return (int)syscall3(SYS_READDIR, fd, (long)index, (long)d); }

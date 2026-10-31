@@ -12,7 +12,9 @@ static inline long syscall3(long n, long a, long b, long c) {
 }
 
 long write(int fd, const void *buf, size_t len);
-void exit(int code) __attribute__((noreturn));
+void _exit(int code) __attribute__((noreturn));
+int  isatty(int fd);                         /* is this descriptor the console? */
+long time_seconds(void);                     /* the kernel's wall clock: seconds since 1970, UTC */
 int  getpid(void);
 void yield(void);
 void sleep_ms(unsigned long ms);

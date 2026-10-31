@@ -226,10 +226,12 @@ static int builtin(struct cmd *c) {
     }
     if (!strcmp(a[0], "help")) {
         printf("Built-ins: cd pwd exit clear help alias unalias which source\n");
-        printf("Programs:  ls cat echo cp mv rm mkdir touch wc grep head ps mem sleep uptime nano\n");
+        printf("Programs:  ls cat echo cp mv rm mkdir touch wc grep head ps mem sleep uptime nano lua\n");
         printf("           hello args count primes fib sortdemo tree life mandel bench forktest umem crash\n");
         printf("Network:   ifconfig  ping 10.0.2.2  nslookup name  wget http://host/path  nc  echoserv  cksum\n");
         printf("Pipes:     ls / | grep bin        Redirect: echo hi > /tmp/a.txt, cat < file, echo more >> file\n");
+        printf("Lua:       lua /home/lua/tour.lua    lua -e \"print(2^10)\"    lua    (an interactive prompt; Ctrl-D quits)\n");
+        printf("           more scripts in /home/lua: primes files life calc http server sysinfo dns udp\n");
         printf("Editor:    nano /disk/notes.txt   (Ctrl-O saves, Ctrl-X exits, Ctrl-G shows all keys)\n");
         printf("Names:     alias ll='ls -l'   then type ll.  Put aliases in /disk/shrc to keep them.\n");
         printf("Disk:      /disk is a FAT32 volume that survives reboots: ls /disk, cat /disk/hello.txt, greet\n");
@@ -239,9 +241,12 @@ static int builtin(struct cmd *c) {
     return 0;
 }
 
+static int last_status;                            /* exit status of the most recent command (1000+N: killed by exception N) */
+
 static void run_pipeline(struct cmd *cmds, int n) {
     int prev_read = -1;
     int children = 0;
+    int last_pid = -1;
     for (int i = 0; i < n; i++) {
         int fds[2] = { -1, -1 };
         if (i + 1 < n && pipe(fds) < 0) { dprintf(2, "sh: cannot create a pipe\n"); break; }
@@ -263,6 +268,7 @@ static void run_pipeline(struct cmd *cmds, int n) {
             exec_program(cmds[i].argv);
         }
         children++;
+        last_pid = pid;
         if (prev_read >= 0) close(prev_read);          /* the parent must not keep pipe ends open, or readers never see EOF */
         if (fds[1] >= 0) close(fds[1]);
         prev_read = fds[0];
@@ -270,12 +276,35 @@ static void run_pipeline(struct cmd *cmds, int n) {
     if (prev_read >= 0) close(prev_read);
     while (children--) {
         int status = 0;
-        if (wait(&status) < 0) break;
+        int done = wait(&status);
+        if (done < 0) break;
+        if (done == last_pid) last_status = status;          /* a pipeline's status is that of its last command */
         if (status >= 1000) dprintf(2, "[killed by exception %d]\n", status - 1000);
     }
 }
 
+static void execute_one(const char *line);
+
+/* A line may hold several commands separated by ';' (outside quotes). */
 static void execute_line(const char *line) {
+    char part[512];
+    size_t n = 0;
+    char quote = 0;
+    for (const char *p = line; ; p++) {
+        if (*p == '"' || *p == '\'') { if (!quote) quote = *p; else if (quote == *p) quote = 0; }
+        if ((*p == ';' && !quote) || !*p) {
+            part[n] = 0;
+            execute_one(part);
+            n = 0;
+            if (!*p) break;
+            continue;
+        }
+        if (n + 1 < sizeof part) part[n++] = *p;
+    }
+}
+
+static void execute_one(const char *line) {
+    last_status = 0;
     char expanded[512];
     struct cmd cmds[MAX_CMDS];
     if (expand_aliases(line, expanded, sizeof expanded) < 0) { dprintf(2, "sh: line too long after expanding aliases\n"); return; }
@@ -285,8 +314,12 @@ static void execute_line(const char *line) {
     run_pipeline(cmds, count);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     char line[256];
+    if (argc >= 3 && !strcmp(argv[1], "-c")) {            /* sh -c "command": run one command line and exit with its status */
+        execute_line(argv[2]);
+        return last_status;
+    }
     run_script("/etc/shrc");                       /* system defaults on the ramdisk */
     run_script("/disk/shrc");                      /* your own, kept on the disk */
     for (;;) {

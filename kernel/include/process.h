@@ -13,3 +13,4 @@ void process_fault(struct interrupt_frame *f, const char *what) __attribute__((n
 long process_brk(uint64_t addr);
 long process_mmap(uint64_t len);
 long process_munmap(uint64_t addr, uint64_t len);
+int  process_grow_stack(uint64_t addr);    /* a fault in the stack region: add a page; 1 if handled */

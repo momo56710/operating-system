@@ -24,6 +24,7 @@
 #include "pci.h"
 #include "net.h"
 #include "cpu.h"
+extern void rtc_init(void);
 
 __attribute__((used, section(".limine_requests_start")))
 static volatile uint64_t requests_start[] = LIMINE_REQUESTS_START_MARKER;
@@ -185,6 +186,7 @@ void kmain(void) {
         kprintf("ACPI: not available, using default APIC addresses\n");
     apic_init();
     sched_init();
+    rtc_init();
 
     size_t initrd_size;
     const void *initrd = module_find("initrd.tar", &initrd_size);

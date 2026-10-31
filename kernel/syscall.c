@@ -20,7 +20,7 @@ static int user_range_ok(uint64_t addr, size_t n, int write) {
     if (!pml4) return 0;
     for (uint64_t page = addr & ~4095ULL; page < addr + n; page += 4096) {
         uint64_t flags;
-        if (!vmm_lookup(pml4, page, &flags)) return 0;
+        if (!vmm_lookup(pml4, page, &flags) && !(process_grow_stack(page) && vmm_lookup(pml4, page, &flags))) return 0;
         if (!(flags & VMM_USER)) return 0;
         if (write && !(flags & VMM_WRITE)) return 0;
     }
@@ -75,7 +75,7 @@ static int fd_install(struct file *f) {
 /* Copy a path from user memory and make it absolute relative to the caller's working directory. */
 static int user_path(uint64_t uptr, char *abs) {
     char raw[PATH_MAX_LEN];
-    if (copy_str_from_user(raw, uptr, sizeof raw) < 0) return -1;
+    if (copy_str_from_user(raw, uptr, sizeof raw) < 0 || !raw[0]) return -1;       /* an empty path names nothing (ENOENT) */
     return vfs_normalize(current_task()->cwd, raw, abs, PATH_MAX_LEN);
 }
 
@@ -264,6 +264,7 @@ static int64_t sys_netctl(uint64_t op, uint64_t uptr) {
 }
 
 extern void disk_stats(struct si_disk *d);
+extern uint64_t wall_time(void);
 
 static int64_t sys_sysinfo(uint64_t what, uint64_t index, uint64_t ubuf) {
     switch (what) {
@@ -357,6 +358,7 @@ int64_t syscall_dispatch(struct interrupt_frame *f) {
     case SYS_MUNMAP:  r = process_munmap(a0, a1); break;
     case SYS_FORK:    r = process_fork(f); break;
     case SYS_UPTIME:  r = (int64_t)uptime_ms(); break;
+    case SYS_TIME:    r = (int64_t)wall_time(); break;
     case SYS_WAIT: {
         int status = 0;
         r = process_wait(&status);
