@@ -30,6 +30,16 @@
 #define SYS_SYSINFO 25  /* sysinfo(what, index, buf) */
 #define SYS_IOCTL   26  /* ioctl(fd, request, arg): terminal control on the console */
 
+#define SYS_SOCKET   27 /* socket(type) -> fd */
+#define SYS_BIND     28 /* bind(fd, port) */
+#define SYS_CONNECT  29 /* connect(fd, struct sockaddr_in *) */
+#define SYS_LISTEN   30 /* listen(fd, backlog) */
+#define SYS_ACCEPT   31 /* accept(fd, struct sockaddr_in *peer) -> new fd */
+#define SYS_SENDTO   32 /* sendto(fd, struct sockmsg *) -> bytes */
+#define SYS_RECVFROM 33 /* recvfrom(fd, struct sockmsg *) -> bytes, 0 at end of stream, -1 on error or timeout */
+#define SYS_NETCTL   34 /* netctl(op, struct *) */
+#define SYS_SHUTDOWN 35 /* shutdown(fd): no more sending; reading continues */
+
 /* ioctl requests */
 #define TTY_RAW  1      /* arg 1: deliver every key as it is typed, no echo or line editing; 0: normal line mode */
 #define TTY_SIZE 2      /* returns (rows << 16) | columns */
@@ -49,6 +59,7 @@
 #define FT_DIR  2
 #define FT_CHAR 3
 #define FT_PIPE 4
+#define FT_SOCK 5
 
 #define NAME_MAX_LEN 56
 #define PATH_MAX_LEN 256
@@ -86,4 +97,38 @@ struct si_disk {
     uint64_t present;         /* a disk driver is active */
     uint64_t sectors;
     uint64_t cache_hits, cache_misses, sector_reads, sector_writes;
+};
+
+/* ---- networking ---- IP addresses and ports are in host byte order. */
+#define SOCK_UDP 1
+#define SOCK_TCP 2
+
+struct sockaddr_in { uint32_t ip; uint16_t port; uint16_t reserved; };
+
+struct sockmsg {                  /* one datagram or one chunk of a stream, in either direction */
+    uint64_t buf;
+    uint64_t len;
+    uint32_t ip;                  /* sendto: destination (0 = the connected peer); recvfrom: sender */
+    uint16_t port;
+    uint16_t reserved;
+    int32_t  timeout_ms;          /* recvfrom: give up after this long (<= 0: wait forever) */
+    int32_t  flags;
+};
+
+#define NET_INFO 1                /* netctl(NET_INFO, struct net_info *) */
+#define NET_PING 2                /* netctl(NET_PING, struct ping_req *) */
+#define NET_SETDNS 3              /* netctl(NET_SETDNS, uint32_t *ip): choose the DNS server */
+
+struct net_info {
+    uint8_t  mac[6];
+    uint16_t up;
+    uint32_t ip, mask, gw, dns;
+    uint64_t rx_frames, tx_frames, rx_bytes, tx_bytes, rx_dropped;
+};
+
+struct ping_req {
+    uint32_t ip;
+    uint32_t seq;
+    int32_t  timeout_ms;
+    int32_t  rtt_ms;              /* out: round-trip time, or -1 */
 };

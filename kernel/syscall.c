@@ -7,6 +7,7 @@
 #include "vfs.h"
 #include "pmm.h"
 #include "heap.h"
+#include "net.h"
 
 /* ---- checked access to user memory ---- */
 
@@ -178,6 +179,83 @@ static int64_t sys_unlink(uint64_t upath) {
     return user_path(upath, path) < 0 ? -1 : vfs_unlink(path);
 }
 
+static int64_t sys_socket(uint64_t type) {
+    struct file *f = sock_create((int)type);
+    return f ? fd_install(f) : -1;
+}
+
+static int64_t sys_connect(uint64_t fd, uint64_t uaddr) {
+    struct file *f = fd_file(fd);
+    struct sockaddr_in a;
+    if (!f || !sock_is_socket(f) || copy_from_user(&a, uaddr, sizeof a) < 0) return -1;
+    return sock_connect(f, a.ip, a.port, 5000);
+}
+
+static int64_t sys_accept(uint64_t fd, uint64_t uaddr) {
+    struct file *f = fd_file(fd);
+    if (!f || !sock_is_socket(f)) return -1;
+    struct sockaddr_in a = { 0, 0, 0 };
+    struct file *nf = sock_accept(f, &a.ip, &a.port, 0);
+    if (!nf) return -1;
+    if (uaddr) copy_to_user(uaddr, &a, sizeof a);
+    return fd_install(nf);
+}
+
+static int64_t sys_sendto(uint64_t fd, uint64_t umsg) {
+    struct file *f = fd_file(fd);
+    struct sockmsg m;
+    if (!f || !sock_is_socket(f) || copy_from_user(&m, umsg, sizeof m) < 0) return -1;
+    char chunk[IO_CHUNK];
+    uint64_t done = 0;
+    do {                                                   /* a stream may be longer than our buffer; a datagram never is */
+        size_t n = m.len - done < sizeof chunk ? m.len - done : sizeof chunk;
+        if (copy_from_user(chunk, m.buf + done, n) < 0) return done ? (int64_t)done : -1;
+        int64_t w = sock_sendto(f, chunk, n, m.ip, m.port);
+        if (w < 0) return done ? (int64_t)done : -1;
+        done += w;
+        if ((size_t)w < n) break;
+    } while (done < m.len);
+    return (int64_t)done;
+}
+
+static int64_t sys_recvfrom(uint64_t fd, uint64_t umsg) {
+    struct file *f = fd_file(fd);
+    struct sockmsg m;
+    if (!f || !sock_is_socket(f) || copy_from_user(&m, umsg, sizeof m) < 0) return -1;
+    char chunk[IO_CHUNK];
+    size_t n = m.len < sizeof chunk ? m.len : sizeof chunk;
+    int64_t r = sock_recvfrom(f, chunk, n, &m.ip, &m.port, m.timeout_ms);
+    if (r > 0 && copy_to_user(m.buf, chunk, r) < 0) return -1;
+    copy_to_user(umsg, &m, sizeof m);                      /* the sender's address */
+    return r;
+}
+
+static int64_t sys_netctl(uint64_t op, uint64_t uptr) {
+    if (op == NET_INFO) {
+        struct net_info n;
+        memset(&n, 0, sizeof n);
+        memcpy(n.mac, netif.mac, 6);
+        n.up = netif.up; n.ip = netif.ip; n.mask = netif.mask; n.gw = netif.gw; n.dns = netif.dns;
+        n.rx_frames = netif.rx_frames; n.tx_frames = netif.tx_frames;
+        n.rx_bytes = netif.rx_bytes; n.tx_bytes = netif.tx_bytes; n.rx_dropped = netif.rx_dropped;
+        return copy_to_user(uptr, &n, sizeof n);
+    }
+    if (op == NET_SETDNS) {
+        uint32_t ip;
+        if (copy_from_user(&ip, uptr, sizeof ip) < 0) return -1;
+        netif.dns = ip;
+        return 0;
+    }
+    if (op == NET_PING) {
+        struct ping_req p;
+        if (!netif.up || copy_from_user(&p, uptr, sizeof p) < 0) return -1;
+        p.rtt_ms = icmp_ping(p.ip, (uint16_t)p.seq, p.timeout_ms > 0 ? p.timeout_ms : 1000);
+        if (copy_to_user(uptr, &p, sizeof p) < 0) return -1;
+        return p.rtt_ms >= 0 ? 0 : -1;
+    }
+    return -1;
+}
+
 extern void disk_stats(struct si_disk *d);
 
 static int64_t sys_sysinfo(uint64_t what, uint64_t index, uint64_t ubuf) {
@@ -249,6 +327,15 @@ int64_t syscall_dispatch(struct interrupt_frame *f) {
     case SYS_MKDIR:   r = sys_mkdir(a0); break;
     case SYS_UNLINK:  r = sys_unlink(a0); break;
     case SYS_SYSINFO: r = sys_sysinfo(a0, a1, a2); break;
+    case SYS_NETCTL:  r = sys_netctl(a0, a1); break;
+    case SYS_SOCKET:  r = sys_socket(a0); break;
+    case SYS_BIND:    { struct file *fl = fd_file(a0); r = fl && sock_is_socket(fl) ? sock_bind(fl, (uint16_t)a1) : -1; break; }
+    case SYS_CONNECT: r = sys_connect(a0, a1); break;
+    case SYS_LISTEN:  { struct file *fl = fd_file(a0); r = fl && sock_is_socket(fl) ? sock_listen(fl, (int)a1) : -1; break; }
+    case SYS_ACCEPT:  r = sys_accept(a0, a1); break;
+    case SYS_SENDTO:  r = sys_sendto(a0, a1); break;
+    case SYS_RECVFROM: r = sys_recvfrom(a0, a1); break;
+    case SYS_SHUTDOWN: { struct file *fl = fd_file(a0); r = fl && sock_is_socket(fl) ? sock_shutdown(fl) : -1; break; }
     case SYS_IOCTL:   { struct file *fl = fd_file(a0); r = fl ? file_ioctl(fl, a1, a2) : -1; break; }
     case SYS_EXIT:    process_exit((int)a0);
     case SYS_GETPID:  r = (int64_t)current_task()->pid; break;

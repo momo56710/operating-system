@@ -22,6 +22,7 @@
 #include "process.h"
 #include "blk.h"
 #include "pci.h"
+#include "net.h"
 
 __attribute__((used, section(".limine_requests_start")))
 static volatile uint64_t requests_start[] = LIMINE_REQUESTS_START_MARKER;
@@ -189,6 +190,7 @@ void kmain(void) {
     } else {
         kprintf("disk: none (add -drive file=disk.img,if=virtio,format=raw)\n");
     }
+    net_init();
     keyboard_init();
     lapic_timer_start(1000);
     kprintf("Scheduler ready, timer at 1000 Hz\n");

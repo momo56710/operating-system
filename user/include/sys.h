@@ -38,3 +38,14 @@ int  mkdir(const char *path);
 int  unlink(const char *path);
 int  sysinfo(int what, unsigned long index, void *buf);
 long ioctl(int fd, int request, long arg);
+
+long netctl(int op, void *arg);
+
+int  socket(int type);
+int  bind(int fd, unsigned port);
+int  connect(int fd, unsigned ip, unsigned port);
+int  listen(int fd, int backlog);
+int  accept(int fd, unsigned *ip, unsigned *port);
+long sendto(int fd, const void *buf, size_t len, unsigned ip, unsigned port);   /* ip 0: the connected peer */
+long recvfrom(int fd, void *buf, size_t len, unsigned *ip, unsigned *port, int timeout_ms);
+int  shutdown(int fd);                                                            /* stop sending; keep reading */

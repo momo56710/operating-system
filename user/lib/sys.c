@@ -35,3 +35,31 @@ int  mkdir(const char *path) { return (int)syscall3(SYS_MKDIR, (long)path, 0, 0)
 int  unlink(const char *path) { return (int)syscall3(SYS_UNLINK, (long)path, 0, 0); }
 int  sysinfo(int what, unsigned long index, void *buf) { return (int)syscall3(SYS_SYSINFO, what, (long)index, (long)buf); }
 long ioctl(int fd, int request, long arg) { return syscall3(SYS_IOCTL, fd, request, arg); }
+long netctl(int op, void *arg) { return syscall3(SYS_NETCTL, op, (long)arg, 0); }
+
+int socket(int type) { return (int)syscall3(SYS_SOCKET, type, 0, 0); }
+int bind(int fd, unsigned port) { return (int)syscall3(SYS_BIND, fd, port, 0); }
+int connect(int fd, unsigned ip, unsigned port) {
+    struct sockaddr_in a = { ip, (uint16_t)port, 0 };
+    return (int)syscall3(SYS_CONNECT, fd, (long)&a, 0);
+}
+int listen(int fd, int backlog) { return (int)syscall3(SYS_LISTEN, fd, backlog, 0); }
+int accept(int fd, unsigned *ip, unsigned *port) {
+    struct sockaddr_in a = { 0, 0, 0 };
+    int r = (int)syscall3(SYS_ACCEPT, fd, (long)&a, 0);
+    if (ip) *ip = a.ip;
+    if (port) *port = a.port;
+    return r;
+}
+long sendto(int fd, const void *buf, size_t len, unsigned ip, unsigned port) {
+    struct sockmsg m = { (uint64_t)buf, len, ip, (uint16_t)port, 0, 0, 0 };
+    return syscall3(SYS_SENDTO, fd, (long)&m, 0);
+}
+long recvfrom(int fd, void *buf, size_t len, unsigned *ip, unsigned *port, int timeout_ms) {
+    struct sockmsg m = { (uint64_t)buf, len, 0, 0, 0, timeout_ms, 0 };
+    long r = syscall3(SYS_RECVFROM, fd, (long)&m, 0);
+    if (ip) *ip = m.ip;
+    if (port) *port = m.port;
+    return r;
+}
+int shutdown(int fd) { return (int)syscall3(SYS_SHUTDOWN, fd, 0, 0); }

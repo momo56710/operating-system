@@ -228,6 +228,7 @@ static int builtin(struct cmd *c) {
         printf("Built-ins: cd pwd exit clear help alias unalias which source\n");
         printf("Programs:  ls cat echo cp mv rm mkdir touch wc grep head ps mem sleep uptime nano\n");
         printf("           hello args count primes fib sortdemo tree life mandel bench forktest umem crash\n");
+        printf("Network:   ifconfig  ping 10.0.2.2  nslookup name  wget http://host/path  nc  echoserv  cksum\n");
         printf("Pipes:     ls / | grep bin        Redirect: echo hi > /tmp/a.txt, cat < file, echo more >> file\n");
         printf("Editor:    nano /disk/notes.txt   (Ctrl-O saves, Ctrl-X exits, Ctrl-G shows all keys)\n");
         printf("Names:     alias ll='ls -l'   then type ll.  Put aliases in /disk/shrc to keep them.\n");
